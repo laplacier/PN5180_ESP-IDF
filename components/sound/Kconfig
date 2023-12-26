@@ -1,0 +1,26 @@
+menu "Prop Sound Options"
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    config ENABLE_SOUND
+        bool "Enable sound output to speaker"
+        default y
+        help
+            Select this if you wish for this prop to play sounds during operation.
+            
+    config VOLUME
+        int "Sound volume"
+        range 0 30
+        default 30
+        depends on ENABLE_SOUND
+        help
+            Sets the software audio volume. Max is 30.
+
+    config COMMON_AUDIO
+        bool "Play audio sent to all channels"
+        default y
+        depends on ENABLE_SOUND
+        help
+            Allows the prop to accept and play sounds sent to all props in the room.
+            
+            These tend to be prerecorded hints or room wide audio cues for events. Disabling this feature only allows prop specific audio to play.
+endmenu

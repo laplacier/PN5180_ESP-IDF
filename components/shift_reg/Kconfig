@@ -1,0 +1,25 @@
+menu "Prop Shift Register Options"
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    config ENABLE_SHIFT
+        bool "Enable shift registers"
+        default y
+        help
+            Select this if you wish for this prop to have expanded IO during operation.
+
+    config NUM_SIPO
+        int "Output registers"
+        range 0 4
+        default 1
+        depends on ENABLE_SHIFT
+        help
+            Defines the number of output shift registers. 8 outputs per register.
+    
+    config NUM_PISO
+        int "Input registers"
+        range 0 4
+        default 1
+        depends on ENABLE_SHIFT
+        help
+            Defines the number of input shift registers. 8 inputs per register.
+endmenu

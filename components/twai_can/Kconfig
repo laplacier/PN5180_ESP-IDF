@@ -1,0 +1,38 @@
+menu "Prop CAN Options"
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    config ENABLE_CAN
+        bool "Enable CAN communication."
+        default y
+        help
+            Select this if you wish for this prop to communicate on the CAN network.
+            
+    choice
+        depends on ENABLE_CAN
+        prompt "CAN operation mode:"
+        help
+            Receive and Transmit - Normal operation. Can transmit and receive 
+            messages on the CAN Bus.
+            
+            Listen only - Silent operation. Will only listen to the CAN Bus and
+            will not transmit any messages aside from acknowledging messages
+            being seen, and replying DND to ping requests. Other props will
+            no longer ping the prop upon seeing the DND request until a prop
+            with the same ID sends a HELLO message.
+    config CAN_OPERATION_FULL
+        bool "Receive and Transmit"
+    
+    config CAN_OPERATION_HALF
+        bool "Listen only"
+    endchoice
+
+    config ENABLE_CAN_INHERIT
+        bool "Enable prop inheritance"
+        default y
+        depends on ENABLE_CAN && CAN_OPERATION_FULL
+        help
+            Allows the prop to inherit the CAN responsibilities of another prop it has 
+            seen that no longer exists on the CAN Bus. Props will battle for 
+            inheritance with other props with this option enabled and the lowest ID 
+            will win.
+endmenu

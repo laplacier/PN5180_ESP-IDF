@@ -1,0 +1,468 @@
+menu "Prop GPIO Options"
+    orsource "$IDF_PATH/examples/common_components/env_caps/$IDF_TARGET/Kconfig.env_caps"
+
+    config ENABLE_GPIO
+        bool "Enable GPIO"
+        default y
+        help
+            Select this if you wish for this prop to have user controllable GPIO.
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 0 mode:"
+        help
+            Caution: Strapping pin. If pulled low, ESP32 will enter serial bootloader.
+
+    config GPIO_0_NONE
+        bool "Unused"
+    
+    config GPIO_0_INPUT
+        bool "Input"
+    
+    config GPIO_0_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_0_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_0_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_0_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 2 mode:"
+        help
+            Caution: Strapping pin. If pulled low/unconnected while GPIO 0 is low, ESP32 will enter serial bootloader.
+
+    config GPIO_2_NONE
+        bool "Unused"
+    
+    config GPIO_2_INPUT
+        bool "Input"
+    
+    config GPIO_2_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_2_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_2_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_2_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 4 mode:"
+
+    config GPIO_4_NONE
+        bool "Unused"
+    
+    config GPIO_4_INPUT
+        bool "Input"
+    
+    config GPIO_4_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_4_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_4_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_4_OUTPUT
+        bool "Output"
+    endchoice
+    
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO_5 mode:"
+        help
+            Caution: Strapping pin. The state of this pin on boot will 
+            alter the SDIO Slave sampling and output behavior.
+
+    config GPIO_5_NONE
+        bool "Unused"
+    
+    config GPIO_5_INPUT
+        bool "Input"
+    
+    config GPIO_5_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_5_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_5_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SHIFT
+        prompt "GPIO_12 mode:"
+        help
+            Caution: Strapping pin. If pulled high on boot, ESP32 may brownout 
+            when accessing FLASH in serial bootloader mode.
+
+    config GPIO_12_NONE
+        bool "Unused"
+    
+    config GPIO_12_INPUT
+        bool "Input"
+    
+    config GPIO_12_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_12_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_12_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_12_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO_13 mode:"
+
+    config GPIO_13_NONE
+        bool "Unused"
+    
+    config GPIO_13_INPUT
+        bool "Input"
+    
+    config GPIO_13_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_13_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_13_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_13_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SHIFT
+        prompt "GPIO 14 mode:"
+
+    config GPIO_14_NONE
+        bool "Unused"
+    
+    config GPIO_14_INPUT
+        bool "Input"
+    
+    config GPIO_14_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_14_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_14_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_14_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 15 mode:"
+        help
+            Caution: Strapping pin. If pulled low, ESP32 will no longer
+            print messages from ROM bootloader on boot.
+
+    config GPIO_15_NONE
+        bool "Unused"
+    
+    config GPIO_15_INPUT
+        bool "Input"
+    
+    config GPIO_15_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_15_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_15_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_15_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SOUND
+        prompt "GPIO 16 mode:"
+
+    config GPIO_16_NONE
+        bool "Unused"
+    
+    config GPIO_16_INPUT
+        bool "Input"
+    
+    config GPIO_16_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_16_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_16_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SOUND
+        prompt "GPIO 17 mode:"
+
+    config GPIO_17_NONE
+        bool "Unused"
+    
+    config GPIO_17_INPUT
+        bool "Input"
+    
+    config GPIO_17_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_17_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_17_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 18 mode:"
+
+    config GPIO_18_NONE
+        bool "Unused"
+    
+    config GPIO_18_INPUT
+        bool "Input"
+    
+    config GPIO_18_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_18_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_18_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 19 mode:"
+
+    config GPIO_19_NONE
+        bool "Unused"
+    
+    config GPIO_19_INPUT
+        bool "Input"
+    
+    config GPIO_19_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_19_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_19_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 22 mode:"
+
+    config GPIO_22_NONE
+        bool "Unused"
+    
+    config GPIO_22_INPUT
+        bool "Input"
+    
+    config GPIO_22_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_22_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_22_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 23 mode:"
+
+    config GPIO_23_NONE
+        bool "Unused"
+    
+    config GPIO_23_INPUT
+        bool "Input"
+    
+    config GPIO_23_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_23_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_23_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SHIFT
+        prompt "GPIO 25 mode:"
+
+    config GPIO_25_NONE
+        bool "Unused"
+    
+    config GPIO_25_INPUT
+        bool "Input"
+    
+    config GPIO_25_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_25_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_25_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_25_ADC_OUTPUT
+        bool "Digital to Analog Output"
+
+    config GPIO_25_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SHIFT
+        prompt "GPIO 26 mode:"
+
+    config GPIO_26_NONE
+        bool "Unused"
+    
+    config GPIO_26_INPUT
+        bool "Input"
+    
+    config GPIO_26_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_26_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_26_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_26_ADC_OUTPUT
+        bool "Digital to Analog Output"
+
+    config GPIO_26_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_SHIFT
+        prompt "GPIO 27 mode:"
+
+    config GPIO_27_NONE
+        bool "Unused"
+    
+    config GPIO_27_INPUT
+        bool "Input"
+    
+    config GPIO_27_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_27_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_27_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_27_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_CAN
+        prompt "GPIO 32 mode:"
+
+    config GPIO_32_NONE
+        bool "Unused"
+    
+    config GPIO_32_INPUT
+        bool "Input"
+    
+    config GPIO_32_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_32_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_32_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_32_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO && !ENABLE_CAN
+        prompt "GPIO 33 mode:"
+
+    config GPIO_33_NONE
+        bool "Unused"
+    
+    config GPIO_33_INPUT
+        bool "Input"
+    
+    config GPIO_33_INPUT_PULLUP
+        bool "Input Pullup"
+
+    config GPIO_33_INPUT_PULLDOWN
+        bool "Input Pulldown"
+
+    config GPIO_33_ADC_INPUT
+        bool "Analog to Digital Input"
+
+    config GPIO_33_OUTPUT
+        bool "Output"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 34 mode:"
+        help
+            Caution: Strapping pin. If pulled low, ESP32 will enter serial bootloader.
+
+    config GPIO_34_NONE
+        bool "Unused"
+    
+    config GPIO_34_INPUT
+        bool "Input"
+    endchoice
+
+    choice
+        depends on ENABLE_GPIO
+        prompt "GPIO 35 mode:"
+
+    config GPIO_35_NONE
+        bool "Unused"
+    
+    config GPIO_35_INPUT
+        bool "Input"
+    endchoice
+endmenu
