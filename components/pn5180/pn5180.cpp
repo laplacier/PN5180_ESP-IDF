@@ -739,6 +739,17 @@ PN5180Error_t pn5180::getInventory() {
     state = iso15693PollSingle();
     if(state){
       clearInfo();
+      setRF_off();
+      if(PN5180_ERR_NO_CARD != state) reset();
+      //state = iso18003PollSingle();
+      if(state){
+        clearInfo();
+        setRF_off();
+        if(PN5180_ERR_NO_CARD != state) reset();
+      }
+      else{
+        //state = iso18003GetSystemInfo();
+      }
     }
     else{
       state = iso15693GetSystemInfo();
@@ -750,13 +761,17 @@ PN5180Error_t pn5180::getInventory() {
 
 PN5180Error_t pn5180::getData(uint8_t blockNo) {
   setupRF(ISO14443);
-  PN5180Error_t state = readSingleBlock(ISO14443, 0);
+  PN5180Error_t state = readSingleBlock(ISO14443, blockNo);
   if(PN5180_ERR_NO_CARD == state){
+    setRF_off();
     setupRF(ISO15693);
-    state = readSingleBlock(ISO15693, 0);
+    state = readSingleBlock(ISO15693, blockNo);
+    if(PN5180_ERR_NO_CARD == state){
+      //setupRF(ISO18003);
+      //state = readSingleBlock(ISO18003, 0);
+    }
   }
-  setRF_off();
-  //reset();
+  reset();
   return state;
 }
 
@@ -795,7 +810,16 @@ PN5180Error_t pn5180::readSingleBlock(uint8_t protocol, uint8_t blockNo) {
         clearInfo();
         return state;
       }
-      //success = iso15693BlockRead(blockNo+startBlock);
+      state = iso15693GetSystemInfo();
+      if(state){
+        clearInfo();
+        return state;
+      }
+      success = iso15693ReadBlock(blockNo+startBlock);
+      if(!success){
+        ESP_LOGE(TAG, "Failed to read tag!");
+        return PN5180_ERR_NO_RESP;
+      }
       break;
     case ISO18003:
       break;
@@ -806,10 +830,40 @@ PN5180Error_t pn5180::readSingleBlock(uint8_t protocol, uint8_t blockNo) {
   }
   return PN5180_OK;
 }
+
 PN5180Error_t pn5180::getInventoryMultiple() {
-  return PN5180_OK;
+  setupRF(ISO14443);
+  PN5180Error_t state = iso14443poll(ISO14443_REQA);
+  if(state){
+    clearInfo();
+    setRF_off();
+    if(PN5180_ERR_NO_CARD != state) reset();
+    setupRF(ISO15693);
+    state = iso15693PollSingle();
+    if(state){
+      clearInfo();
+      setRF_off();
+      if(PN5180_ERR_NO_CARD != state) reset();
+      //state = iso18003PollSingle();
+      if(state){
+        clearInfo();
+        setRF_off();
+        if(PN5180_ERR_NO_CARD != state) reset();
+      }
+      else{
+        //state = iso18003GetSystemInfo();
+      }
+    }
+    else{
+      state = iso15693GetSystemInfo();
+    }
+  }
+  reset();
+  return state;
 }
+
 void pn5180::printInfo() {
+  printUID();
   ESP_LOGI(TAG, "MemSize=%d BlockSize=%d NumBlocks=%d", blockSize * numBlocks, blockSize, numBlocks);
   ESP_LOGI(TAG, "FirstBlock=%d LastBlock=%d", startBlock, endBlock);
 }
@@ -948,7 +1002,7 @@ PN5180Error_t pn5180::iso15693GetSystemInfo() {
   uint32_t irqR = getIRQStatus();
   if (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
     //printIRQStatus(TAG, irqR);
-    ESP_LOGD(TAG, "getSystemInfo: No data response.");
+    ESP_LOGI(TAG, "getSystemInfo: No data response.");
     return PN5180_ERR_NO_CARD;
   }
   uint16_t retries = 5;
@@ -1053,7 +1107,7 @@ PN5180Error_t pn5180::iso15693GetSystemInfo() {
  *  when ERROR flag is NOT set:
  *    SOF, Flags, BlockData (len=blockLength), CRC16, EOF
  */
-ISO15693ErrorCode_t pn5180::iso15693ReadSingleBlock(uint8_t blockNo) {
+bool pn5180::iso15693ReadBlock(uint8_t blockNo) {
   //                              flags, cmd, uid,             blockNo
   uint8_t readSingleBlockCmd[11] = { 0x22, 0x20, 1,2,3,4,5,6,7,8, blockNo }; // UID has LSB first!
   //                                |\- high data rate
@@ -1065,28 +1119,14 @@ ISO15693ErrorCode_t pn5180::iso15693ReadSingleBlock(uint8_t blockNo) {
   ESP_LOGD(TAG,"readSingleBlock: Read Single Block #%d, size=%d: ", blockNo, blockSize);
   ESP_LOG_BUFFER_HEX_LEVEL(TAG, readSingleBlockCmd, sizeof(readSingleBlockCmd), ESP_LOG_DEBUG);
 
-  ESP_LOGD(TAG, "readSingleBlock: Loading RF-Configuration for ISO15693...");
-  if(loadRFConfig(0x0D, 0x8D) != ESP_OK){               // 1. Load the ISO15693 protocol into the RF registers
-    ESP_LOGE(TAG, "readSingleBlock: Error loading ISO15693 RF-Configuration");
-    return ISO15693_EC_UNKNOWN_ERROR;
-  }
-
-  ESP_LOGD(TAG, "readSingleBlock: Turning ON RF field for ISO15693...");
-  if(setRF_on() != ESP_OK){                             // 2. Switch the RF field ON.
-    ESP_LOGE(TAG, "readSingleBlock: Error turning on RF for ISO15693");
-    return ISO15693_EC_UNKNOWN_ERROR;
-  }
-
   clearIRQStatus(0x000FFFFF); // 3. Clear all IRQ_STATUS flags
   sendData(readSingleBlockCmd, 11, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
   vTaskDelay(pdMS_TO_TICKS(15));
 
   uint32_t irqR = getIRQStatus();
   if (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
-    printIRQStatus(TAG, irqR);
-    ESP_LOGE(TAG, "readSingleBlock: No data response.");
-    setRF_off();
-    return EC_NO_CARD;
+    //printIRQStatus(TAG, irqR);
+    return false;
   }
   uint16_t retries = 5;
   while (!(irqR & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
@@ -1098,15 +1138,12 @@ ISO15693ErrorCode_t pn5180::iso15693ReadSingleBlock(uint8_t blockNo) {
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001ff);
   if(!(irqR & PN5180_RX_IRQ_STAT)){
-    ESP_LOGE(TAG, "readSingleBlock: Timeout waiting for response to end. Datalen=%d", len);
-    setRF_off();
-    reset();
-    return EC_NO_CARD;
+    ESP_LOGI(TAG, "readSingleBlock: Timeout waiting for response to end. Datalen=%d", len);
+    return false;
   }
   if(!len){
-    ESP_LOGE(TAG, "readSingleBlock: Length is 0!!");
-    setRF_off();
-    return EC_NO_CARD;
+    ESP_LOGI(TAG, "readSingleBlock: Length is 0!!");
+    return false;
   }
 
   uint8_t *resultPtr = readBuffer;
@@ -1120,8 +1157,7 @@ ISO15693ErrorCode_t pn5180::iso15693ReadSingleBlock(uint8_t blockNo) {
   ESP_LOGD(TAG,"readSingleBlock: Value=");
   ESP_LOG_BUFFER_HEX_LEVEL(TAG, blockData, blockSize, ESP_LOG_DEBUG);
 
-  setRF_off();
-  return ISO15693_EC_OK;
+  return true;
 }
 
 /*
@@ -1312,12 +1348,8 @@ bool pn5180::mifareBlockRead(uint8_t blockNo) {
     return false;
   }
 
-  uint8_t *resultPtr = readBuffer;
+  uint8_t *resultPtr = blockData;
   resultPtr = readData(len);
-  for(int i=0; i<len; i++){
-    printf("%x : ", resultPtr[i]);
-  }
-  printf("\n");
   
 	return true;
 }

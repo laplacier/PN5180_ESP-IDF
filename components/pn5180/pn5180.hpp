@@ -151,8 +151,9 @@ private:
   uint8_t firmware[2]; // {minor ver, major ver}
   uint8_t eeprom[2]; // {minor ver, major ver}
   uint8_t manufacturer;
+  uint8_t numCard;
   uint8_t type;
-  uint8_t uid[10]; // MSBFIRST (ex: uid{8,7,6,5,4,3,2,1} = 1:2:3:4:5:6:7:8)
+  uint8_t uid[160]; // MSBFIRST (ex: uid{8,7,6,5,4,3,2,1} = 1:2:3:4:5:6:7:8)
   uint8_t uidLength;
   uint8_t dsfid;
   uint8_t afi;
@@ -163,9 +164,8 @@ private:
   uint16_t startBlock;
   uint16_t endBlock;
   uint8_t blockData[508];
-
   uint8_t readBuffer[508];
-  uint8_t sak[5];
+  uint8_t sak[10];
   ISO15693Inventory_t poll;
 
 public:
@@ -237,7 +237,7 @@ private:
   ISO15693ErrorCode_t iso15693Poll(void);
   PN5180Error_t iso15693PollSingle(void);
   PN5180Error_t iso15693GetSystemInfo(void);
-  ISO15693ErrorCode_t iso15693ReadSingleBlock(uint8_t blockNo);
+  bool iso15693ReadBlock(uint8_t blockNo);
   ISO15693ErrorCode_t ISO15693Command(uint8_t *cmd, uint16_t cmdLen, uint8_t **resultPtr);
 };
 

@@ -46,11 +46,11 @@ void app_main(void)
   vTaskDelay(pdMS_TO_TICKS(1000));
 
   while(1){
-        PN5180Error_t success = nfc.getInventory();
+        PN5180Error_t success = nfc.getData(0);
         if(PN5180_OK == success){
             ESP_LOGI(TAG, "Found tag!");
-            nfc.printUID();
             nfc.printInfo();
+            nfc.printSingleBlock(0);
         }
         else{
             ESP_LOGI(TAG, "No tags found.");
