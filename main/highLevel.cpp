@@ -46,11 +46,23 @@ void app_main(void)
   vTaskDelay(pdMS_TO_TICKS(1000));
 
   while(1){
-        PN5180Error_t success = nfc.getData(0);
+        const char *data = "a slice of meatloaf";
+        PN5180Error_t success;
+        /*success = nfc.writeData(data);
+        if(PN5180_OK == success){
+            ESP_LOGI(TAG, "Wrote tag!");
+        }
+        else{
+            ESP_LOGI(TAG, "No tags found.");
+        }*/
+        success = nfc.readData();
         if(PN5180_OK == success){
             ESP_LOGI(TAG, "Found tag!");
-            nfc.printInfo();
-            nfc.printSingleBlock(0);
+            uint8_t cardNum = nfc.getNumCard();
+            nfc.printInfo(cardNum-1);
+            //nfc.printSingleBlock(0, 0);
+            //nfc.printMultipleBlock(0, 0, 2);
+            nfc.printData(cardNum-1);
         }
         else{
             ESP_LOGI(TAG, "No tags found.");

@@ -253,7 +253,7 @@ ISO15693ErrorCode_t pn5180_inventoryPoll(ISO15693Inventory_t *nfc, uint32_t *col
  *   >0 = Error code
  */
 ISO15693ErrorCode_t pn5180_ISO15693Command(uint8_t *cmd, uint16_t cmdLen, uint8_t **resultPtr) {
-  ESP_LOGD(TAG,"ISO5693Command: Issue Command 0x%X...", cmd[1]);
+  ESP_LOGD(TAG,"ISO15693Command: Issue Command 0x%X...", cmd[1]);
   pn5180_sendData(cmd, cmdLen, 0);
   vTaskDelay(pdMS_TO_TICKS(10));
 

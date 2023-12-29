@@ -159,7 +159,7 @@ pn5180::pn5180(uint8_t MISOpin, uint8_t MOSIpin, uint8_t CLKpin, uint8_t SSpin, 
   // Configure software settings for pn5180
   pn5180_devcfg={
       .mode = 0,
-      .clock_speed_hz = 7000000,
+      .clock_speed_hz = 1000000,
       .spics_io_num = (gpio_num_t)SSpin,
       .queue_size = 7,
       .pre_cb = NULL,
@@ -167,13 +167,35 @@ pn5180::pn5180(uint8_t MISOpin, uint8_t MOSIpin, uint8_t CLKpin, uint8_t SSpin, 
   };
 }
 
-uint8_t pn5180::getManufacturer(void) const { return manufacturer; }
-uint8_t pn5180::getType(void) const { return type; }
-uint8_t pn5180::getDsfid(void) const { return dsfid; }
-uint8_t pn5180::getAfi(void) const { return afi; }
-uint8_t pn5180::getICRef(void) const { return ic_ref; }
-uint8_t pn5180::getBlockSize(void) const { return blockSize; }
-uint8_t pn5180::getNumBlocks(void) const { return numBlocks; }
+uint8_t pn5180::getNumCard(void) const { return numCard; }
+uint8_t pn5180::getManufacturer(uint8_t cardNum){ 
+  if(cardNum > numCard) return 0;
+  return card.manufacturer[cardNum]; 
+}
+uint8_t pn5180::getType(uint8_t cardNum) { 
+  if(cardNum > numCard) return 0;
+  return card.type[cardNum]; 
+}
+uint8_t pn5180::getDsfid(uint8_t cardNum) { 
+  if(cardNum > numCard) return 0;
+  return card.dsfid[cardNum];
+}
+uint8_t pn5180::getAfi(uint8_t cardNum) { 
+  if(cardNum > numCard) return 0;
+  return card.afi[cardNum];
+}
+uint8_t pn5180::getICRef(uint8_t cardNum) { 
+  if(cardNum > numCard) return 0;
+  return card.ic_ref[cardNum]; 
+}
+uint8_t pn5180::getBlockSize(uint8_t cardNum) { 
+  if(cardNum > numCard) return 0;
+  return card.blockSize[cardNum]; 
+}
+uint8_t pn5180::getNumBlocks(uint8_t cardNum) { 
+  if(cardNum > numCard) return 0;
+  return card.numBlocks[cardNum]; 
+}
 //uint8_t pn5180::getUID(void) const { return uid; }
 
 ///////////////
@@ -424,6 +446,7 @@ esp_err_t pn5180::setRF_on() {
 esp_err_t pn5180::setRF_off() {
 
   uint8_t cmd[2] = { PN5180_RF_OFF, 0x00 };
+  printIRQStatus(TAG, getIRQStatus());
   transceiveCommand(cmd, 2, 0, 0);
 
   uint8_t retries = 50;
@@ -433,7 +456,7 @@ esp_err_t pn5180::setRF_off() {
   }
   if(0 == (PN5180_TX_RFOFF_IRQ_STAT & getIRQStatus())) {
     ESP_LOGE(TAG, "setRF_off: Failed to turn off RF, was it already off?");
-    printIRQStatus(TAG, getIRQStatus());
+    //printIRQStatus(TAG, getIRQStatus());
     return ESP_FAIL;
   }
 
@@ -486,7 +509,7 @@ esp_err_t pn5180::setupRF(uint8_t protocol) {
  */
 esp_err_t pn5180::sendData(uint8_t *data, uint16_t len, uint8_t validBits) {
   if (len > 260){
-    ESP_LOGE(TAG, "sendData: Length of data exceeds 260 bytes");
+    ESP_LOGW(TAG, "sendData: Length of data exceeds 260 bytes");
     return ESP_ERR_INVALID_SIZE;
   }
 
@@ -500,16 +523,54 @@ esp_err_t pn5180::sendData(uint8_t *data, uint16_t len, uint8_t validBits) {
   uint8_t regs[2] = {PN5180_SYSTEM_CONFIG, PN5180_SYSTEM_CONFIG};
   uint8_t cmd[2] = {0x03, 0x02};
   uint32_t value[2] = {0xFFFFFFF8, 0x00000003};
-  writeRegisterMultiple(regs,cmd,2,value);
+  esp_err_t ret = writeRegisterMultiple(regs,cmd,2,value);
+  if(ESP_OK != ret){
+    ESP_LOGW(TAG,"sendData: Error writing data to multiple registers");
+    return ESP_ERR_INVALID_STATE;
+  }
 
   PN5180TransceiveState_t state = getTransceiveState();
   ESP_LOGD(TAG,"sendData: state=%d",(uint8_t)(state));
   if (PN5180_TS_WaitTransmit != state){
-    ESP_LOGE(TAG, "sendData: TransceiveState not WaitTransmit");
+    ESP_LOGW(TAG, "sendData: TransceiveState not WaitTransmit");
     return ESP_ERR_INVALID_STATE;
   }
 
   return transceiveCommand(buffer, len+2, 0, 0);
+}
+
+PN5180Error_t pn5180::sendData(const char *data) {
+  uint8_t len = strlen(data);
+  if(!len) return PN5180_ERR_INVALID_PARAM;
+  if(len > card.blockSize[numCard]) len = card.blockSize[numCard];
+
+  uint8_t buffer[card.blockSize[numCard]+2] = {0};
+  buffer[0] = PN5180_SEND_DATA;
+  buffer[1] = 0; // number of valid bits of last byte are transmitted (0 = all bits are transmitted)
+  memcpy(buffer+2, data, len);
+
+  uint8_t regs[2] = {PN5180_SYSTEM_CONFIG, PN5180_SYSTEM_CONFIG};
+  uint8_t cmd[2] = {0x03, 0x02};
+  uint32_t value[2] = {0xFFFFFFF8, 0x00000003};
+  esp_err_t ret =  writeRegisterMultiple(regs,cmd,2,value);
+  if(ESP_OK != ret){
+    ESP_LOGW(TAG, "sendData: Unable to write multiple registers");
+    return PN5180_ERR_REGISTER;
+  }
+
+  PN5180TransceiveState_t state = getTransceiveState();
+  ESP_LOGD(TAG,"sendData: state=%d",(uint8_t)(state));
+  if (PN5180_TS_WaitTransmit != state){
+    ESP_LOGW(TAG, "sendData: TransceiveState not WaitTransmit");
+    return PN5180_ERR_TIMEOUT;
+  }
+  ret = transceiveCommand(buffer, card.blockSize[numCard]+2, 0, 0);
+  if(ESP_OK != ret){
+    ESP_LOGW(TAG, "sendData: SPI transaction failed");
+    return PN5180_ERR_UNKNOWN;
+  }
+
+  return PN5180_OK;
 }
 
 /*
@@ -653,7 +714,7 @@ void pn5180::printRfStatus(const char* tag, uint32_t rfStatus) {
 }
 
 ISO15693ErrorCode_t pn5180::iso15693Poll(){
-  poll.numCard = 0;
+  numCard = 0;
   uint8_t numCol = 0;
   uint32_t collision[16] = {0};
   uint8_t maskLen = 0;
@@ -703,11 +764,11 @@ ISO15693ErrorCode_t pn5180::iso15693Poll(){
 
         // Record raw UID data                                          // 10. Record all data to Inventory struct
         for (int i=0; i<8; i++) {
-          poll.uid[poll.numCard][i] = readBuffer[2+i];
+          card.uid[numCard][i] = readBuffer[2+i];
         }
 
         ESP_LOGI(TAG,"getInventory: Response flags: 0x%X, Data Storage Format ID: 0x%X", readBuffer[0], readBuffer[1]);
-        poll.numCard++;
+        numCard++;
       }
       
       if(slot+1 < 16){ // If we have more cards to poll for...
@@ -729,47 +790,199 @@ ISO15693ErrorCode_t pn5180::iso15693Poll(){
 }
 
 PN5180Error_t pn5180::getInventory() {
+  numCard = 0;
   setupRF(ISO14443);
   PN5180Error_t state = iso14443poll(ISO14443_REQA);
   if(state){
-    clearInfo();
+    clearInfo(numCard);
     setRF_off();
     if(PN5180_ERR_NO_CARD != state) reset();
     setupRF(ISO15693);
-    state = iso15693PollSingle();
+    state = iso15693PollSingle(numCard);
     if(state){
-      clearInfo();
+      clearInfo(numCard);
       setRF_off();
       if(PN5180_ERR_NO_CARD != state) reset();
       //state = iso18003PollSingle();
       if(state){
-        clearInfo();
+        clearInfo(numCard);
         setRF_off();
         if(PN5180_ERR_NO_CARD != state) reset();
       }
       else{
+        //numCard++;
         //state = iso18003GetSystemInfo();
       }
     }
     else{
-      state = iso15693GetSystemInfo();
+      numCard++;
+      state = iso15693GetSystemInfo(numCard);
     }
+  }
+  else{
+    numCard++;
   }
   setRF_off();
   return state;
 }
 
 PN5180Error_t pn5180::getData(uint8_t blockNo) {
+  numCard = 0;
+  if(ESP_OK != setupRF(ISO14443)){
+    ESP_LOGW(TAG,"getData: Failed to setupRF for ISO14443");
+  }
+  PN5180Error_t state = readSingleBlock(ISO14443, blockNo);
+  if(PN5180_ERR_NO_CARD == state){
+    if(ESP_OK != setRF_off()){
+      ESP_LOGW(TAG,"getData: Failed to setRF_off for ISO14443");
+    }
+    if(ESP_OK != setupRF(ISO15693)){
+      ESP_LOGW(TAG,"getData: Failed to setupRF for ISO15693");
+    }
+    state = readSingleBlock(ISO15693, blockNo);
+    if(PN5180_ERR_NO_CARD == state){
+      setRF_off();
+      //setupRF(ISO18003);
+      //state = readSingleBlock(ISO18003, 0);
+    }
+    else if(PN5180_OK == state){
+      numCard++;
+    }
+    else{
+      ESP_LOGW(TAG,"getData: Failed to readSingleBlock for ISO15693, %d", state);
+    }
+  }
+  else if(PN5180_OK == state){
+    numCard++;
+  }
+  else{
+    ESP_LOGW(TAG,"getData: Failed to readSingleBlock for ISO14443");
+  }
+  reset();
+  return state;
+}
+
+PN5180Error_t pn5180::getData(uint8_t blockNo, uint8_t numBlock) {
+  //vTaskDelay(pdMS_TO_TICKS(1000));
+  numCard = 0;
   setupRF(ISO14443);
   PN5180Error_t state = readSingleBlock(ISO14443, blockNo);
   if(PN5180_ERR_NO_CARD == state){
     setRF_off();
     setupRF(ISO15693);
-    state = readSingleBlock(ISO15693, blockNo);
+    if(!numBlock){
+      state = readSingleBlock(ISO15693, blockNo);
+    }
+    else{
+      state = readMultipleBlock(ISO15693, blockNo, numBlock);
+    }
     if(PN5180_ERR_NO_CARD == state){
       //setupRF(ISO18003);
       //state = readSingleBlock(ISO18003, 0);
     }
+    else if(PN5180_OK == state){
+      numCard++;
+    }
+  }
+  else if(PN5180_OK == state){
+    numCard++;
+  }
+  reset();
+  return state;
+}
+PN5180Error_t pn5180::readData(void){
+  numCard = 0;
+  card.blocksRead[numCard] = 0;
+  PN5180Error_t state = PN5180_OK;
+  setupRF(ISO14443);
+  state = readMultipleBlock(ISO14443, 0, 2);
+  ESP_LOGI(TAG, "readData: Read %d blocks", card.blocksRead[numCard]);
+  if(PN5180_ERR_NO_CARD == state){
+    card.blocksRead[numCard] = 0;
+    setRF_off();
+    setupRF(ISO15693);
+    state = readMultipleBlock(ISO15693, 0, 6);
+    if(PN5180_ERR_NO_CARD == state){
+      //card.blocksRead[numCard] = 0;
+      //setupRF(ISO18003);
+      //state = readSingleBlock(ISO18003, 0);
+    }
+    else if(PN5180_OK == state){
+      numCard++;
+    }
+  }
+  else if(PN5180_OK == state){
+    numCard++;
+  }
+  reset();
+  return state;
+}
+
+PN5180Error_t pn5180::writeData(const char* data) {
+  numCard = 0;
+  setupRF(ISO14443);
+  PN5180Error_t state = iso14443poll(ISO14443_REQA);
+  if(PN5180_ERR_NO_CARD == state){
+    setRF_off();
+    setupRF(ISO15693);
+    state = iso15693PollSingle(numCard);
+    if(PN5180_ERR_NO_CARD == state){
+      //setupRF(ISO18003);
+      //state = readSingleBlock(ISO18003, 0);
+      //if(state){
+      //  reset();
+      //  return state;
+      //}
+      //else if (PN5180_OK == state){
+        // do write
+      //}
+    }
+    else if(PN5180_OK == state){
+      state = iso15693GetSystemInfo(numCard);
+      if(PN5180_OK == state){
+        uint8_t blocksToWrite = (strlen(data) / card.blockSize[numCard]) + 1; // Blocks to write, rounded up
+        for(int i=0; i<blocksToWrite; i++){
+          const char *slice = data+(i*card.blockSize[numCard]);
+          bool success = iso15693WriteBlock(slice, card.startBlock[numCard]+i);
+          if(!success){
+            ESP_LOGW(TAG, "writeData: Failed to write ISO15693 tag!");
+            reset();
+            return PN5180_ERR_UNKNOWN;
+          }
+        }
+        numCard++;
+      }
+      else{
+        ESP_LOGW(TAG,"writeData: Failed to perform iso15693 sysInfo");
+      }
+    }
+    else{
+      ESP_LOGW(TAG,"writeData: Failed to perform iso15693 poll");
+    }
+  }
+  else if(PN5180_OK == state){
+    bool success = mifareAuthenticate(card.startBlock[numCard]);
+    if(!success){
+      ESP_LOGW(TAG, "Failed to authenticate Mifare tag!");
+      mifareHalt();
+      reset();
+      return PN5180_ERR_NO_RESP;
+    }
+    uint8_t blocksToWrite = (strlen(data) / card.blockSize[numCard]) + 1; // Blocks to write, rounded up
+    for(int i=0; i<blocksToWrite; i++){
+      const char *slice = data+(i*card.blockSize[numCard]);
+      success = mifareWriteBlock(slice, card.startBlock[numCard]+i);
+      if(!success){
+        ESP_LOGW(TAG, "Failed to write Mifare tag!");
+        mifareHalt();
+        reset();
+        return PN5180_ERR_UNKNOWN;
+      }
+    }
+    numCard++;
+  }
+  else{
+    ESP_LOGW(TAG,"writeData: Failed to perform iso14443 poll");
   }
   reset();
   return state;
@@ -782,22 +995,79 @@ PN5180Error_t pn5180::readSingleBlock(uint8_t protocol, uint8_t blockNo) {
     case ISO14443:
       state = iso14443poll(ISO14443_REQA);
       if(state){
-        clearInfo();
+        if(PN5180_ERR_NO_CARD != state) ESP_LOGW(TAG,"readSingleBlock: Failed to perform iso14443 poll");
+        clearInfo(numCard);
         return state;
       }
-      if(blockNo + startBlock > endBlock){
-        ESP_LOGE(TAG, "Chosen block not a valid block");
+      if(blockNo + card.startBlock[numCard] > card.endBlock[numCard]){
+        ESP_LOGW(TAG, "Chosen block not a valid block");
         return PN5180_ERR_INVALID_PARAM;
       }
-      success = mifareAuthenticate(blockNo+startBlock);
+      success = mifareAuthenticate(blockNo+card.startBlock[numCard]);
       if(!success){
-        ESP_LOGE(TAG, "Failed to authenticate Mifare tag!");
+        ESP_LOGW(TAG, "Failed to authenticate Mifare tag!");
+        return PN5180_ERR_NO_RESP;
+      }
+      success = mifareReadBlock(numCard, blockNo+card.startBlock[numCard]);
+      if(!success){
+        ESP_LOGW(TAG, "Failed to read Mifare tag!");
+        return PN5180_ERR_NO_RESP;
+      }
+      break;
+    case ISO15693:
+      // Find UID and info
+      state = iso15693PollSingle(numCard);
+      if(state){
+        if(PN5180_ERR_NO_CARD != state) ESP_LOGW(TAG,"readSingleBlock: Failed to perform iso15693 poll");
+        clearInfo(numCard);
+        return state;
+      }
+      state = iso15693GetSystemInfo(numCard);
+      if(state){
+        if(PN5180_ERR_NO_CARD != state) ESP_LOGW(TAG,"readSingleBlock: Failed to get Iso15693 sysInfo");
+        clearInfo(numCard);
+        return state;
+      }
+      //printInfo(numCard);
+      success = iso15693ReadBlock(numCard, blockNo+card.startBlock[numCard]);
+      if(!success){
+        ESP_LOGW(TAG, "readSingleBlock: Failed to read ISO15693 tag!");
+        return PN5180_ERR_NO_RESP;
+      }
+      break;
+    case ISO18003:
+      break;
+    default:
+      ESP_LOGW(TAG, "readSingleBlock: Unknown protocol selected");
+      return PN5180_ERR_UNKNOWN;
+      break;
+  }
+  return PN5180_OK;
+}
+
+PN5180Error_t pn5180::readMultipleBlock(uint8_t protocol, uint8_t blockNo, uint8_t numBlock) {
+  bool success;
+  PN5180Error_t state;
+  switch(protocol){
+    case ISO14443:
+      state = iso14443poll(ISO14443_REQA);
+      if(state){
+        clearInfo(numCard);
+        return state;
+      }
+      if(!numBlock || (card.startBlock[numCard] + blockNo + numBlock > card.endBlock[numCard])){
+        ESP_LOGW(TAG, "readMultipleBlock: Chosen blocks exceed memory of ISO14443 card");
+        return PN5180_ERR_INVALID_PARAM;
+      }
+      success = mifareAuthenticate(blockNo+card.startBlock[numCard]);
+      if(!success){
+        ESP_LOGE(TAG, "readMultipleBlock: Failed to authenticate Mifare tag!");
         mifareHalt();
         return PN5180_ERR_NO_RESP;
       }
-      success = mifareBlockRead(blockNo+startBlock);
+      success = mifareReadMultipleBlock(numCard, card.startBlock[numCard], 2);
       if(!success){
-        ESP_LOGE(TAG, "Failed to read Mifare tag!");
+        ESP_LOGE(TAG, "readMultipleBlock: Failed to read Mifare tag!");
         mifareHalt();
         return PN5180_ERR_NO_RESP;
       }
@@ -805,19 +1075,24 @@ PN5180Error_t pn5180::readSingleBlock(uint8_t protocol, uint8_t blockNo) {
       break;
     case ISO15693:
       // Find UID and info
-      state = iso15693PollSingle();
+      state = iso15693PollSingle(numCard);
       if(state){
-        clearInfo();
+        clearInfo(numCard);
         return state;
       }
-      state = iso15693GetSystemInfo();
+      state = iso15693GetSystemInfo(numCard);
       if(state){
-        clearInfo();
+        clearInfo(numCard);
         return state;
       }
-      success = iso15693ReadBlock(blockNo+startBlock);
+      printInfo(numCard);
+      if(!numBlock || (card.startBlock[numCard] + blockNo + numBlock > card.endBlock[numCard])){
+        ESP_LOGW(TAG, "readMultipleBlock: Chosen blocks exceed memory of ISO15693 card");
+        return PN5180_ERR_INVALID_PARAM;
+      }
+      success = iso15693ReadMultipleBlock(numCard, blockNo+card.startBlock[numCard], numBlock);
       if(!success){
-        ESP_LOGE(TAG, "Failed to read tag!");
+        ESP_LOGE(TAG, "readMultipleBlock: Failed to read tag!");
         return PN5180_ERR_NO_RESP;
       }
       break;
@@ -835,18 +1110,18 @@ PN5180Error_t pn5180::getInventoryMultiple() {
   setupRF(ISO14443);
   PN5180Error_t state = iso14443poll(ISO14443_REQA);
   if(state){
-    clearInfo();
+    clearInfo(numCard);
     setRF_off();
     if(PN5180_ERR_NO_CARD != state) reset();
     setupRF(ISO15693);
-    state = iso15693PollSingle();
+    state = iso15693PollSingle(numCard);
     if(state){
-      clearInfo();
+      clearInfo(numCard);
       setRF_off();
       if(PN5180_ERR_NO_CARD != state) reset();
       //state = iso18003PollSingle();
       if(state){
-        clearInfo();
+        clearInfo(numCard);
         setRF_off();
         if(PN5180_ERR_NO_CARD != state) reset();
       }
@@ -855,24 +1130,25 @@ PN5180Error_t pn5180::getInventoryMultiple() {
       }
     }
     else{
-      state = iso15693GetSystemInfo();
+      state = iso15693GetSystemInfo(numCard);
     }
   }
   reset();
   return state;
 }
 
-void pn5180::printInfo() {
-  printUID();
-  ESP_LOGI(TAG, "MemSize=%d BlockSize=%d NumBlocks=%d", blockSize * numBlocks, blockSize, numBlocks);
-  ESP_LOGI(TAG, "FirstBlock=%d LastBlock=%d", startBlock, endBlock);
+void pn5180::printInfo(uint8_t cardNum) {
+  printUID(cardNum);
+  ESP_LOGI(TAG, "MemSize=%d BlockSize=%d NumBlocks=%d", card.blockSize[cardNum] * card.numBlocks[cardNum], card.blockSize[cardNum], card.numBlocks[cardNum]);
+  ESP_LOGI(TAG, "FirstBlock=%d LastBlock=%d", card.startBlock[cardNum], card.endBlock[cardNum]);
 }
 
-void pn5180::clearInfo() {
-  memset(uid, 0, sizeof(uid));
-  type = blockSize = numBlocks = startBlock = endBlock = 0;
-  manufacturer = uidLength = afi = ic_ref = 0;
-  dsfid = 0;
+void pn5180::clearInfo(uint8_t cardNum) {
+  memset(card.uid[cardNum], 0, sizeof(card.uid[cardNum]));
+  memset(card.data[cardNum], 0, sizeof(card.data[cardNum]));
+  card.type[cardNum] = card.blockSize[cardNum] = card.numBlocks[cardNum] = card.startBlock[cardNum] = card.endBlock[cardNum] = 0;
+  card.manufacturer[cardNum] = card.uidLength[cardNum] = card.afi[cardNum] = card.ic_ref[cardNum] = 0;
+  card.dsfid[cardNum] = card.blocksRead[cardNum] = 0;
 }
 
 /*
@@ -882,7 +1158,7 @@ void pn5180::clearInfo() {
  * Response format: SOF, Resp.Flags, DSFID, UID, CRC16, EOF
  *
  */
-PN5180Error_t pn5180::iso15693PollSingle() {
+PN5180Error_t pn5180::iso15693PollSingle(uint8_t cardNum) {
   //                      Flags,  CMD, maskLen
   uint8_t inventory[3] = { 0x26, 0x01, 0x00 };
   //                         |\- inventory flag + high data rate
@@ -906,13 +1182,13 @@ PN5180Error_t pn5180::iso15693PollSingle() {
   readBuffer = readData(len);
 
   if(readBuffer[9] != 224){
-    ESP_LOGD(TAG, "iso15693PollSingle: UID in unrecognized format! %X should be E0", readBuffer[9]);
+    ESP_LOGW(TAG, "iso15693PollSingle: UID in unrecognized format! %X should be E0", readBuffer[9]);
     return PN5180_ERR_UNKNOWN; // UIDs always start with E0h (224d)
   }
 
   // Record raw UID data
   for (int i=0; i<8; i++) {
-    uid[i] = readBuffer[2+i];
+    card.uid[cardNum][i] = readBuffer[2+i];
   }
 
   /*
@@ -930,13 +1206,13 @@ PN5180Error_t pn5180::iso15693PollSingle() {
    */
 
   // Record Manufacturer code
-  manufacturer = uid[6];
+  card.manufacturer[cardNum] = card.uid[cardNum][6];
 
   // Record IC type
-  type = uid[5];
+  card.type[cardNum] = ISO15693;
 
   ESP_LOGD(TAG,"iso15693PollSingle: Response flags: 0x%X, Data Storage Format ID: 0x%X", readBuffer[0], readBuffer[1]);
-  uidLength = 8;
+  card.uidLength[cardNum] = 8;
   return PN5180_OK;
 }
 
@@ -986,93 +1262,93 @@ PN5180Error_t pn5180::iso15693PollSingle() {
  *
  *    IC reference: The IC reference is on 8 bits and its meaning is defined by the IC manufacturer.
  */
-PN5180Error_t pn5180::iso15693GetSystemInfo() {
-  uint8_t sysInfo[10] = { 0x22, 0x2B, 1,2,3,4,5,6,7,8 };  // UID has LSB first!
+PN5180Error_t pn5180::iso15693GetSystemInfo(uint8_t cardNum) {
+  uint8_t cmd[10] = { 0x22, 0x2B, 1,2,3,4,5,6,7,8 };  // UID has LSB first!
   for (int i=0; i<8; i++) {
-    sysInfo[2+i] = uid[i];
+    cmd[2+i] = card.uid[cardNum][i];
   }
 
   ESP_LOGD(TAG,"getSystemInfo: Get System Information");
-  ESP_LOG_BUFFER_HEX_LEVEL(TAG, sysInfo, sizeof(sysInfo), ESP_LOG_DEBUG);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, cmd, sizeof(cmd), ESP_LOG_DEBUG);
 
   clearIRQStatus(0x000FFFFF); // 3. Clear all IRQ_STATUS flags
-  sendData(sysInfo, 10, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
+  sendData(cmd, 10, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
   vTaskDelay(pdMS_TO_TICKS(15));
 
-  uint32_t irqR = getIRQStatus();
-  if (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
+  uint32_t irqStatus = getIRQStatus();
+  if (!(irqStatus & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
     //printIRQStatus(TAG, irqR);
-    ESP_LOGI(TAG, "getSystemInfo: No data response.");
+    ESP_LOGW(TAG, "getSystemInfo: No data response.");
     return PN5180_ERR_NO_CARD;
   }
   uint16_t retries = 5;
-  while (!(irqR & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
+  while (!(irqStatus & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
     vTaskDelay(10 / portTICK_PERIOD_MS);
-    irqR = getIRQStatus();
+    irqStatus = getIRQStatus();
 	  retries--;
   }
   ESP_LOGD(TAG, "getSystemInfo: RX_IRQ_STAT Retries - %d", retries);
   uint32_t rxStatus;
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001ff);
-  if(!(irqR & PN5180_RX_IRQ_STAT)){
-    ESP_LOGD(TAG, "getSystemInfo: Timeout waiting for response to end. Datalen=%d", len);
+  if(!(irqStatus & PN5180_RX_IRQ_STAT)){
+    ESP_LOGW(TAG, "getSystemInfo: Timeout waiting for response to end. Datalen=%d", len);
     return PN5180_ERR_TIMEOUT;
   }
   if(!len){
-    ESP_LOGD(TAG, "getSystemInfo: Length is 0!!");
+    ESP_LOGW(TAG, "getSystemInfo: Length is 0!!");
     return PN5180_ERR_NO_RESP;
   }
-  uint8_t *resultPtr = readBuffer;
-  resultPtr = readData(len);
+  uint8_t *p = readBuffer;
+  p = readData(len);
 
   for (int i=0; i<8; i++) {
-    uid[i] = resultPtr[2+i];
+    card.uid[cardNum][i] = p[2+i];
   }
 
-  uint8_t *p = &resultPtr[10];
-  uint8_t infoFlags = resultPtr[1];
+  uint8_t *pFlags = &p[10];
+  uint8_t infoFlags = p[1];
   if(infoFlags & 0x01) { // DSFID flag
-    dsfid = (uint8_t)(*p++);
-    ESP_LOGD(TAG, "getSystemInfo: DSFID=%X", dsfid); // Data storage format identifier
+    card.dsfid[cardNum] = (uint8_t)(*pFlags++);
+    ESP_LOGD(TAG, "getSystemInfo: DSFID=%X", card.dsfid[cardNum]); // Data storage format identifier
   }
   else{
-    dsfid = 0;
+    card.dsfid[cardNum] = 0;
     ESP_LOGD(TAG,"getSystemInfo: No DSFID");
   }
   
   if (infoFlags & 0x02) { // AFI flag
-    afi = *p++;
-    afi >>= 4;
+    card.afi[cardNum] = *pFlags++;
+    card.afi[cardNum] >>= 4;
   }
   else{
-    afi = 0;
+    card.afi[cardNum] = 0;
     ESP_LOGD(TAG,"getSystemInfo: No AFI");
   }
 
   if (infoFlags & 0x04) { // VICC Memory size
-    numBlocks = *p++;
-    blockSize = *p++;
-    blockSize &= 0x1F;
-    startBlock = 0;
-    endBlock = numBlocks;
-    numBlocks++;
-    blockSize++;
+    card.numBlocks[cardNum] = *pFlags++;
+    card.blockSize[cardNum] = *pFlags++;
+    card.blockSize[cardNum] &= 0x1F;
+    card.startBlock[cardNum] = 0;
+    card.endBlock[cardNum] = card.numBlocks[cardNum];
+    card.numBlocks[cardNum]++;
+    card.blockSize[cardNum]++;
   
-    ESP_LOGD(TAG, "getSystemInfo: VICC MemSize=%d BlockSize=%d NumBlocks=%d", blockSize * numBlocks, blockSize, numBlocks);
+    ESP_LOGD(TAG, "getSystemInfo: VICC MemSize=%d BlockSize=%d NumBlocks=%d", card.blockSize[cardNum] * card.numBlocks[cardNum], card.blockSize[cardNum], card.numBlocks[cardNum]);
   }
   else{
-    blockSize = 0;
-    numBlocks = 0;
-    ESP_LOGD(TAG, "getSystemInfo: No VICC memory size");
+    card.blockSize[cardNum] = 0;
+    card.numBlocks[cardNum] = 0;
+    ESP_LOGW(TAG, "getSystemInfo: No VICC memory size");
   }
    
   if (infoFlags & 0x08) { // IC reference
-    ic_ref = (uint8_t)(*p++);
-    ESP_LOGD(TAG, "getSystemInfo: IC Ref=%X", ic_ref);
+    card.ic_ref[cardNum] = (uint8_t)(*pFlags++);
+    ESP_LOGD(TAG, "getSystemInfo: IC Ref=%X", card.ic_ref[cardNum]);
   }
   else{
-    ic_ref = 0; 
+    card.ic_ref[cardNum] = 0; 
     ESP_LOGD(TAG,"getSystemInfo: No IC ref");
   }
 
@@ -1107,55 +1383,60 @@ PN5180Error_t pn5180::iso15693GetSystemInfo() {
  *  when ERROR flag is NOT set:
  *    SOF, Flags, BlockData (len=blockLength), CRC16, EOF
  */
-bool pn5180::iso15693ReadBlock(uint8_t blockNo) {
-  //                              flags, cmd, uid,             blockNo
-  uint8_t readSingleBlockCmd[11] = { 0x22, 0x20, 1,2,3,4,5,6,7,8, blockNo }; // UID has LSB first!
-  //                                |\- high data rate
-  //                                \-- no options, addressed by UID
+bool pn5180::iso15693ReadBlock(uint8_t cardNum, uint8_t blockNo) {
+  if(ISO15693 != card.type[cardNum]){
+    ESP_LOGW(TAG, "Card is not ISO15693 compatible");
+    return false;
+  }
+  //                 flags,  cmd, uid,             blockNo
+  uint8_t cmd[11] = { 0x22, 0x20, 1,2,3,4,5,6,7,8, blockNo }; // UID has LSB first!
+  //                    |\- high data rate
+  //                    \-- no options, addressed by UID
   for (int i=0; i<8; i++) {
-    readSingleBlockCmd[2+i] = uid[i];
+    cmd[2+i] = card.uid[cardNum][i];
   }
 
-  ESP_LOGD(TAG,"readSingleBlock: Read Single Block #%d, size=%d: ", blockNo, blockSize);
-  ESP_LOG_BUFFER_HEX_LEVEL(TAG, readSingleBlockCmd, sizeof(readSingleBlockCmd), ESP_LOG_DEBUG);
+  ESP_LOGD(TAG,"readSingleBlock: Read Single Block #%d, size=%d: ", blockNo, card.blockSize[cardNum]);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, cmd, 11, ESP_LOG_DEBUG);
 
   clearIRQStatus(0x000FFFFF); // 3. Clear all IRQ_STATUS flags
-  sendData(readSingleBlockCmd, 11, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
+  sendData(cmd, 11, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
   vTaskDelay(pdMS_TO_TICKS(15));
 
-  uint32_t irqR = getIRQStatus();
-  if (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
+  uint32_t irqStatus = getIRQStatus();
+  if (!(irqStatus & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
     //printIRQStatus(TAG, irqR);
     return false;
   }
-  uint16_t retries = 5;
-  while (!(irqR & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-    irqR = getIRQStatus();
+  uint16_t retries = 10;
+  while (!(irqStatus & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+    irqStatus = getIRQStatus();
 	  retries--;
   }
   uint32_t rxStatus;
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001ff);
-  if(!(irqR & PN5180_RX_IRQ_STAT)){
-    ESP_LOGI(TAG, "readSingleBlock: Timeout waiting for response to end. Datalen=%d", len);
+  if(!(irqStatus & PN5180_RX_IRQ_STAT)){
+    ESP_LOGW(TAG, "readSingleBlock: Timeout waiting for response to end. Datalen=%d", len);
     return false;
   }
   if(!len){
-    ESP_LOGI(TAG, "readSingleBlock: Length is 0!!");
+    ESP_LOGW(TAG, "readSingleBlock: Length is 0!!");
     return false;
   }
 
-  uint8_t *resultPtr = readBuffer;
-  resultPtr = readData(len);
+  uint8_t *p = readBuffer;
+  p = readData(len);
 
-  uint8_t startAddr = blockNo * blockSize;
-  for (int i=0; i<blockSize; i++) {
-    blockData[startAddr + i] = resultPtr[1+i];
+  uint8_t startAddr = card.blocksRead[cardNum] * card.blockSize[cardNum];
+  for (int i=0; i<card.blockSize[cardNum]; i++) {
+    card.data[cardNum][startAddr + i] = p[1+i];
   }
+  card.blocksRead[cardNum]++;
 
   ESP_LOGD(TAG,"readSingleBlock: Value=");
-  ESP_LOG_BUFFER_HEX_LEVEL(TAG, blockData, blockSize, ESP_LOG_DEBUG);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, card.data[cardNum], card.blockSize[cardNum], ESP_LOG_DEBUG);
 
   return true;
 }
@@ -1164,16 +1445,16 @@ bool pn5180::iso15693ReadBlock(uint8_t blockNo) {
  * 
  */
 PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
-	if (writeRegisterAndMask(PN5180_SYSTEM_CONFIG, 0xFFFFFFBF) != ESP_OK) {     // 3. Switch the CRC extension off in Tx direction
-		ESP_LOGE(TAG, "iso14443Poll: Failed to disable crypto");
+	if (writeRegisterAndMask(PN5180_SYSTEM_CONFIG, 0xFFFFFFBF) != ESP_OK) {     // Turn off crypto1
+		ESP_LOGW(TAG, "iso14443Poll: Failed to disable crypto");
 		return PN5180_ERR_REGISTER;
 	}
   if (writeRegisterAndMask(PN5180_CRC_RX_CONFIG, 0xFFFFFFFE) != ESP_OK) {     // 3. Switch the CRC extension off in Tx direction
-		ESP_LOGE(TAG, "iso14443Poll: Failed to disable CRC TX");
+		ESP_LOGW(TAG, "iso14443Poll: Failed to disable CRC TX");
 		return PN5180_ERR_REGISTER;
 	}
 	if (writeRegisterAndMask(PN5180_CRC_TX_CONFIG, 0xFFFFFFFE) != ESP_OK) {     // 4. Switch the CRC extension off in Rx direction
-		ESP_LOGE(TAG, "iso14443Poll: Failed to disable CRC RX");
+		ESP_LOGW(TAG, "iso14443Poll: Failed to disable CRC RX");
 		return PN5180_ERR_REGISTER;
 	}
   clearIRQStatus(0x000FFFFF);                                                 // 5. Clear the interrupt register IRQ_STATUS
@@ -1191,9 +1472,14 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
   uint32_t rxStatus;
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001FF);
+
+  if(!len){ // If len=0, ATQA unsuccessful, no card
+    ESP_LOGD(TAG, "iso14443Poll: No card detected. State=%ld", irqStatus);
+    return PN5180_ERR_NO_CARD;
+  }
   
-  uint8_t* resultPtr = readBuffer;
-  resultPtr = readData(2);                                                    // 10. Read the reception buffer (ATQA)
+  uint8_t* p = readBuffer;
+  p = readData(2);                                                    // 10. Read the reception buffer (ATQA)
 
   /* Table specifies the coding of 2 byte ATQA, All RFU bits shall be set to (0)b
    * | 15 14 13 12 | 11 10 09 08 |  07 06  |  05 |     04 03 02 01 00      |
@@ -1204,7 +1490,7 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
    * However, the recommendation for MIFARE is to ignore ATQA, and only use this as
    * a means to recognize the presence of a card.
    */ 
-  ESP_LOGD(TAG, "iso14443Poll: ATQA: %d:%d, len: %d", resultPtr[0], resultPtr[1], len);
+  ESP_LOGD(TAG, "iso14443Poll: ATQA: %d:%d, len: %d", p[0], p[1], len);
 
   /* ANTICOLLISION CASCADE LEVEL 1 */
   uint8_t casc1[2] = {0x93, 0x20};
@@ -1217,18 +1503,18 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
   readRegister(PN5180_RX_STATUS, &rxStatus);
   len = (uint16_t)(rxStatus & 0x000001FF);
   if (len != 5 && len != 0) {
-		ESP_LOGD(TAG, "iso14443Poll: Card present but collision detected, try again...");
+		ESP_LOGW(TAG, "iso14443Poll: Card present but collision detected, try again...");
     return PN5180_ERR_COLLISION;
 	}
   if (!len){
-    ESP_LOGD(TAG, "iso14443Poll: No length detected! Did the card move?");
+    ESP_LOGW(TAG, "iso14443Poll: No length detected! Did the card move?");
     return PN5180_ERR_NO_RESP;
   }
 
   /* Obtain and process SAK response */
-  uint8_t* sakBuf = sak;
-	sakBuf = readData(len); // Get SAK
-  ESP_LOGD(TAG, "len=%d, SAK=%x:%x:%x:%x:%x", len, sakBuf[0], sakBuf[1], sakBuf[2], sakBuf[3], sakBuf[4]);
+  uint8_t* pSak = sak;
+	pSak = readData(len); // Get SAK
+  ESP_LOGD(TAG, "len=%d, SAK=%x:%x:%x:%x:%x", len, pSak[0], pSak[1], pSak[2], pSak[3], pSak[4]);
 
 
   if (writeRegisterOrMask(PN5180_CRC_RX_CONFIG, 0x01) != ESP_OK) { // 3. Switch the CRC extension on in Tx direction
@@ -1241,7 +1527,7 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
 	}
 
   cmd[1] = 0x70;
-  memcpy(cmd+2, sakBuf, 5);
+  memcpy(cmd+2, pSak, 5);
   clearIRQStatus(0x000FFFFF);
 
   ESP_LOGD(TAG, "sendCmd: %x:%x:%x:%x:%x:%x:%x", cmd[0],cmd[1],cmd[2],cmd[3],cmd[4], cmd[5], cmd[6]);
@@ -1251,12 +1537,12 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
   readRegister(PN5180_RX_STATUS, &rxStatus);
   len = (uint16_t)(rxStatus & 0x000001ff);
 
-  uint8_t* uidBuf = uid;
+  uint8_t* pUID = card.uid[numCard];
   if(!len){
     ESP_LOGI(TAG, "iso14443Poll: No length detected. We are done.");
-    uidLength = 4;
-    type = ISO14443;
-    memcpy(uidBuf, cmd+2, 4);
+    card.uidLength[numCard] = 4;
+    card.type[numCard] = ISO14443;
+    memcpy(pUID, cmd+2, 4);
     return PN5180_OK;
   }
 
@@ -1269,10 +1555,10 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
   ESP_LOGD(TAG, "ATS: %d", sak2Buf[0]);
   if (!(sak2Buf[0] & 0x04)) { // Check bit 3 of 2nd SAK. If 0, the uidLength = 4
     ESP_LOGD(TAG, "iso14443Poll: sak_sel2 confirmed. We should be activated.");
-		uidLength = 4;
-    type = ISO14443;
+		card.uidLength[numCard] = 4;
+    card.type[numCard] = ISO14443;
     iso14443GetSystemInfo(sak2Buf[0]);
-    memcpy(uidBuf, cmd+2, 4);
+    memcpy(pUID, cmd+2, 4);
     return PN5180_OK;
 	}
   /*ESP_LOGI(TAG, "UID ongoing: %d:%d:%d", uid[0],uid[1],uid[2]);
@@ -1315,25 +1601,33 @@ PN5180Error_t pn5180::iso14443poll(uint8_t atqaCmd){
 void pn5180::iso14443GetSystemInfo(uint8_t ats){
   ESP_LOGD(TAG, "Looking for mifate tag type 0x%x", ats);
   const MifareType_t mType = mifare.find(ats)->second;
-  numBlocks = mType.numBlocks;
-  blockSize = mType.blockSize;
-  startBlock = mType.startBlock;
-  endBlock = mType.endBlock;
+  card.numBlocks[numCard] = mType.numBlocks;
+  card.blockSize[numCard] = mType.blockSize;
+  card.startBlock[numCard] = mType.startBlock;
+  card.endBlock[numCard] = mType.endBlock;
 }
 
 bool pn5180::mifareAuthenticate(uint8_t blockNo){
-  uint8_t auth[13] = {0x0C, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x60, blockNo, uid[0], uid[1], uid[2], uid[3]};
+  uint8_t auth[13] = {0x0C, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x60, 
+                      blockNo, 
+                      card.uid[numCard][0], 
+                      card.uid[numCard][1], 
+                      card.uid[numCard][2], 
+                      card.uid[numCard][3]};
   clearIRQStatus(0x000FFFFF);
 
-  uint8_t *resultPtr = readBuffer;
-  transceiveCommand(auth, 13, resultPtr, 1);
+  uint8_t *p = readBuffer;
+  esp_err_t ret = transceiveCommand(auth, 13, p, 1);
+  if(ESP_OK != ret){
+    ESP_LOGW(TAG, "mifareAuthenticate: Failed during transceive command");
+  }
+  ESP_LOGI(TAG, "mifareAuthenticate: Response: %x", p[0]);
 
-  return (resultPtr[0]) ? false : true;
+  return (p[0]) ? false : true;
 }
 
-bool pn5180::mifareBlockRead(uint8_t blockNo) {
-  uint8_t readB[2] = {0x30, 4};
-  printUID();
+bool pn5180::mifareReadBlock(uint8_t cardNum, uint8_t blockNo) {
+  uint8_t readB[2] = {0x30, blockNo};
 
   clearIRQStatus(0x000FFFFF);
   sendData(readB, 2, 0);
@@ -1342,49 +1636,114 @@ bool pn5180::mifareBlockRead(uint8_t blockNo) {
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001FF);
   
-  ESP_LOGD(TAG, "mifareRead: len=%d", len);
+  ESP_LOGI(TAG, "mifareReadBlock: blockNo=%d len=%d", blockNo, len);
   if(!len){
-    ESP_LOGD(TAG, "Unable to read Mifare block");
+    ESP_LOGW(TAG, "Unable to read Mifare block");
     return false;
   }
 
-  uint8_t *resultPtr = blockData;
-  resultPtr = readData(len);
+  uint8_t *p = readBuffer;
+  p = readData(len);
+  uint8_t startAddr = card.blocksRead[cardNum] * card.blockSize[cardNum];
+  for (int i=0; i<card.blockSize[cardNum]; i++) {
+    card.data[cardNum][startAddr + i] = p[i];
+  }
+  uint8_t *q = card.blocksRead;
+  q[cardNum] = card.blocksRead[cardNum] + 1;
+  ESP_LOGI(TAG, "mifareReadBlock: cardNum=%d, blocksRead=%d, data=", cardNum, q[cardNum]);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, p, len, ESP_LOG_INFO);
   
 	return true;
 }
 
-bool pn5180::mifareBlockWrite(uint8_t *data, uint8_t blockNo) {
+bool pn5180::mifareReadMultipleBlock(uint8_t cardNum, uint8_t blockNo, uint8_t numBlock) {
+  uint8_t readB[2] = {0x30, blockNo};
+
+  for(int block=0; block<numBlock; block++) {
+    readB[1] = blockNo + block;
+    clearIRQStatus(0x000FFFFF);
+    sendData(readB, 2, 0);
+    vTaskDelay(pdMS_TO_TICKS(15));
+    uint32_t rxStatus;
+    readRegister(PN5180_RX_STATUS, &rxStatus);
+    uint16_t len = (uint16_t)(rxStatus & 0x000001FF);
+    
+    ESP_LOGI(TAG, "mifareReadBlock: blockNo=%d len=%d", blockNo, len);
+    if(!len){
+      ESP_LOGW(TAG, "Unable to read Mifare block");
+      return false;
+    }
+
+    uint8_t *p = readBuffer;
+    p = readData(len);
+    uint8_t startAddr = block * card.blockSize[cardNum];
+    for (int i=0; i<card.blockSize[cardNum]; i++) {
+      card.data[cardNum][startAddr + i] = p[i];
+    }
+    uint8_t *q = card.blocksRead;
+    q[cardNum] = card.blocksRead[cardNum] + 1;
+    ESP_LOGI(TAG, "mifareReadBlock: cardNum=%d, blocksRead=%d, data=", cardNum, q[cardNum]);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, p, len, ESP_LOG_INFO);
+  }
+	return true;
+}
+
+bool pn5180::mifareWriteBlock(const char *data, uint8_t blockNo) {
   uint8_t writeCmd[2] = {0xA0, blockNo};
+  //cmd[0] = 0xA0;
+  //cmd[1] = blockNo;
+  ESP_LOGI(TAG, "mifareWrite: cmd=%x %x blockNo=%d", writeCmd[0], writeCmd[1], blockNo);
+  clearIRQStatus(0x000FFFFF);
   writeRegisterAndMask(PN5180_CRC_RX_CONFIG, 0xFFFFFFFE);
   
-  clearIRQStatus(0x000FFFFF);
   sendData(writeCmd, 2, 0);
   vTaskDelay(pdMS_TO_TICKS(15));
   uint32_t rxStatus;
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001ff);
-
-  ESP_LOGI(TAG, "mifareWrite: len=%d", len);
-  printIRQStatus(TAG, getIRQStatus());
-  uint8_t *resultPtr = readBuffer;
-  resultPtr = readData(len);
-  for(int i=0; i<len; i++){
-    printf("%x : ", resultPtr[i]);
+  if(!len){
+    ESP_LOGW(TAG,"mifareWrite: No response in pt1");
+    return false;
   }
-  printf("\n");
-  printIRQStatus(TAG, getIRQStatus());
+  ESP_LOGI(TAG, "mifareWrite: ACK len=%d", len);
+
+  uint8_t *p = readBuffer;
+  p = readData(len);
+  uint8_t startAddr = blockNo * card.blockSize[numCard];
+  for (int i=0; i<card.blockSize[numCard]; i++) {
+    card.data[numCard][startAddr + i] = p[1+i];
+  }
+  if(p[0] != 0x0A){
+    ESP_LOGW(TAG,"mifareWrite: Write pt1 failed! ACK=%d", p[0]);
+    while(1) vTaskDelay(portMAX_DELAY);
+    //return false;
+  }
+  ESP_LOGD(TAG,"mifareWrite: Write pt1 acknowledged");
+
+  uint8_t dataToWrite[card.blockSize[numCard]] = {0};
+  len = strlen(data);
+  memcpy(dataToWrite, data, len);
 
   clearIRQStatus(0x000FFFFF);
-  sendData(data, 16, 0);
+  ESP_LOGI(TAG,"mifareWrite: len=%d dataToWrite=", card.blockSize[numCard]);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, dataToWrite, card.blockSize[numCard], ESP_LOG_INFO);
+  sendData(dataToWrite, card.blockSize[numCard], 0);
   vTaskDelay(pdMS_TO_TICKS(15));
   readRegister(PN5180_RX_STATUS, &rxStatus);
   len = (uint16_t)(rxStatus & 0x000001ff);
-  if(!len) {
-    ESP_LOGD(TAG, "Length 0, expected Length 16");
+  if(!len){
+    ESP_LOGW(TAG,"mifareWrite: No response in pt2");
     return false;
   }
 
+  p = readData(len);
+  if(p[0] != 0x0A){
+    ESP_LOGW(TAG,"mifareWrite: Write pt2 failed! ACK=%d", p[0]);
+    return false;
+  }
+  ESP_LOGD(TAG,"mifareWrite: Write pt2 acknowledged");
+
+  writeRegisterOrMask(PN5180_CRC_RX_CONFIG, 0x01);
   return true;
 }
 
@@ -1425,40 +1784,99 @@ void pn5180::mifareHalt(void) {
  *  when ERROR flag is NOT set:
  *    SOF, Resp.Flags, CRC16, EOF
  */
-ISO15693ErrorCode_t pn5180::writeSingleBlock(uint8_t blockNo, uint8_t* blockData, uint8_t len) {
-  if(len > blockSize){ // Data to write is too large
-    return ISO15693_EC_BLOCK_NOT_AVAILABLE;
-  }
-  
-  //                            flags, cmd, uid,             blockNo
-  uint8_t writeSingleBlockCmd[] = { 0x22, 0x21, 1,2,3,4,5,6,7,8, blockNo }; // UID has LSB first!
-  //                               |\- high data rate
-  //                               \-- no options, addressed by UID
+bool pn5180::iso15693WriteBlock(uint8_t cardNum, uint8_t blockNo, uint8_t* data, uint8_t len) {
+  if(len > card.blockSize[cardNum]) len = card.blockSize[cardNum];
 
-  uint8_t writeCmdSize = sizeof(writeSingleBlockCmd) + blockSize;
-  uint8_t* writeCmd = (uint8_t*)heap_caps_malloc(writeCmdSize, MALLOC_CAP_8BIT);
-  ESP_LOGD(TAG,"Free malloc after: %d", heap_caps_get_free_size(MALLOC_CAP_8BIT));
-  uint8_t pos = 0;
-  writeCmd[pos++] = writeSingleBlockCmd[0];
-  writeCmd[pos++] = writeSingleBlockCmd[1];
-  for (int i=0; i<8; i++) {
-    writeCmd[pos++] = uid[i];
+  uint8_t dataToWrite[8] = {0};
+  memcpy(dataToWrite, data, len);
+  
+  //                               flags, cmd, uid,             blockNo
+  uint8_t writeCmd[] = { 0x22, 0x21, 1,2,3,4,5,6,7,8, blockNo }; // UID has LSB first!
+  //                                  |\- high data rate
+  //                                  \-- no options, addressed by UID
+
+  //uint8_t writeCmdSize = sizeof(writeSingleBlockCmd) + blockSize;
+  uint8_t cmd[sizeof(writeCmd) + len];
+  memcpy(writeCmd, card.uid[cardNum], 8);
+  writeCmd[10] = blockNo;
+  memcpy(cmd, writeCmd, 2);
+  memcpy(cmd+sizeof(writeCmd), dataToWrite, len);
+
+  ESP_LOGI(TAG,"iso15693WriteBlock: Write Single Block #%d, size=%d: ", blockNo, card.blockSize[cardNum]);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, writeCmd, 21, ESP_LOG_INFO);
+
+  clearIRQStatus(0x000FFFFF); // 3. Clear all IRQ_STATUS flags
+  sendData(writeCmd, 13+card.blockSize[cardNum], 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
+  vTaskDelay(pdMS_TO_TICKS(15));
+
+  uint32_t irqStatus = getIRQStatus();
+  if (!(irqStatus & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
+    ESP_LOGW(TAG, "iso15693WriteBlock: No RX_SOF from IRQ_STATUS");
+    //printIRQStatus(TAG, irqR);
+    return false;
   }
-  writeCmd[pos++] = blockNo;
-  uint8_t startAddr = blockNo * blockSize;
+  uint16_t retries = 10;
+  while (!(irqStatus & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+    irqStatus = getIRQStatus();
+	  retries--;
+  }
+  if(!(irqStatus & PN5180_RX_IRQ_STAT)) ESP_LOGW(TAG, "iso15693WriteBlock: No RX from IRQ_STATUS");
+  return true;
+}
+
+bool pn5180::iso15693WriteBlock(const char *blockData, uint8_t blockNo) {
+  uint8_t dataToWrite[card.blockSize[numCard]] = {0};
+  uint8_t len = strlen(blockData);
+  if(len > card.blockSize[numCard]) len = card.blockSize[numCard];
+  memcpy(dataToWrite, blockData, len);
+  
+  //                               flags, cmd, uid,             blockNo
+  uint8_t writeCmd[] = { 0x22, 0x21, 1,2,3,4,5,6,7,8, blockNo }; // UID has LSB first!
+  //                                  |\- high data rate
+  //                                  \-- no options, addressed by UID
+
+  //uint8_t writeCmdSize = sizeof(writeSingleBlockCmd) + blockSize;
+  uint8_t cmd[sizeof(writeCmd) + card.blockSize[numCard]];
+  //ESP_LOGD(TAG,"Free malloc after: %d", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+  //uint8_t pos = 0;
+  memcpy(writeCmd+2, card.uid[numCard], 8);
+  writeCmd[10] = blockNo;
+  memcpy(cmd, writeCmd, sizeof(writeCmd));
+  memcpy(cmd+sizeof(writeCmd), dataToWrite, card.blockSize[numCard]);
+  //writeCmd[pos++] = writeSingleBlockCmd[0];
+  //writeCmd[pos++] = writeSingleBlockCmd[1];
+  //for (int i=0; i<8; i++) {
+  //  writeCmd[pos++] = uid[i];
+  //}
+  //writeCmd[pos++] = blockNo;
+  //uint8_t startAddr = blockNo * card.blockSize[numCard];
   // Start of actual data creation loop
-  for (int i=0; i<len; i++) {
-    writeCmd[pos++] = blockData[startAddr + i];
-  }
+  //for (int i=0; i<len; i++) {
+  //  writeCmd[pos++] = blockData[startAddr + i];
+  //}
   // End of data loop
 
-  ESP_LOGI(TAG,"writeSingleBlock: Write Single Block #%d, size=%d: ", blockNo, blockSize);
-  ESP_LOG_BUFFER_HEX_LEVEL(TAG, writeCmd, writeCmdSize, ESP_LOG_INFO);
+  ESP_LOGI(TAG,"iso15693WriteBlock: Write Single Block #%d, size=%d: ", blockNo, sizeof(writeCmd)+card.blockSize[numCard]);
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, cmd, sizeof(cmd), ESP_LOG_INFO);
 
-  uint8_t *resultPtr;
-  ISO15693ErrorCode_t rc = ISO15693Command(writeCmd, writeCmdSize, &resultPtr);
-  heap_caps_free(writeCmd);
-  return rc;
+  clearIRQStatus(0x000FFFFF); // 3. Clear all IRQ_STATUS flags
+  sendData(cmd, sizeof(writeCmd)+card.blockSize[numCard], 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
+  vTaskDelay(pdMS_TO_TICKS(15));
+
+  /*uint32_t irqStatus = getIRQStatus();
+  if (!(irqStatus & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
+    //printIRQStatus(TAG, irqR);
+    ESP_LOGW(TAG, "iso15693WriteBlock: Didn't detect RX_SOF");
+    return false;
+  }
+  uint16_t retries = 10;
+  while (!(irqStatus & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
+    vTaskDelay(5 / portTICK_PERIOD_MS);
+    irqStatus = getIRQStatus();
+	  retries--;
+  }*/
+  return true;
 }
 
 /*
@@ -1489,213 +1907,73 @@ ISO15693ErrorCode_t pn5180::writeSingleBlock(uint8_t blockNo, uint8_t* blockData
  *  when ERROR flag is NOT set:
  *    SOF, Flags, BlockData (len=nfc->blockSize * numBlock), CRC16, EOF
  */
-ISO15693ErrorCode_t pn5180::readMultipleBlock(uint8_t blockNo, uint8_t numBlock) {
-  if(blockNo > numBlocks-1){
-    ESP_LOGE(TAG, "Starting block exceeds length of data");
-    return ISO15693_EC_BLOCK_NOT_AVAILABLE;
+bool pn5180::iso15693ReadMultipleBlock(uint8_t cardNum, uint8_t blockNo, uint8_t numBlock) {
+  if(blockNo > card.endBlock[cardNum]){
+    ESP_LOGW(TAG, "iso15693ReadMultipleBlock: Starting block exceeds memory");
+    return false;
   }
-  if( (blockNo + numBlock) > numBlocks ){
-    ESP_LOGE(TAG, "End of block exceeds length of data");
-    return ISO15693_EC_BLOCK_NOT_AVAILABLE;
+  if( (blockNo + numBlock - 1) > card.endBlock[cardNum] ){
+    ESP_LOGW(TAG, "iso15693ReadMultipleBlock: End of block exceeds memory");
+    return false;
   }
-  //if(len < (numBlock * blockSize)){ // Data to read is larger than provided var
-  //  return ISO15693_EC_BLOCK_NOT_AVAILABLE;
-  //}
 
   //uint8_t readMultipleCmd[4] = {0x02, 0x23, blockNo, numBlock-1};
   //                              flags, cmd, uid,             blockNo
-  uint8_t readMultipleCmd[12] = { 0x22, 0x23, 1,2,3,4,5,6,7,8, blockNo, (uint8_t)(numBlock-1) }; // UID has LSB first!
+  uint8_t cmd[12] = { 0x22, 0x23, 1,2,3,4,5,6,7,8, blockNo, (uint8_t)(numBlock-1) }; // UID has LSB first!
   //                                |\- high data rate
   //                                \-- no options, addressed by UID
   for (int i=0; i<8; i++) {
-    readMultipleCmd[2+i] = uid[i];
-  }
-
-  ESP_LOGD(TAG,"readMultipleBlock: Read Block #%d-%d, size=%d: ", blockNo, blockNo+numBlock-1, blockSize);
-  ESP_LOGD(TAG, "readMultipleBlock: Loading RF-Configuration for ISO15693...");
-  if(loadRFConfig(0x0D, 0x8D) != ESP_OK){               // 1. Load the ISO15693 protocol into the RF registers
-    ESP_LOGE(TAG, "readMultipleBlock: Error loading ISO15693 RF-Configuration");
-    reset();
-    return ISO15693_EC_UNKNOWN_ERROR;
-  }
-
-  ESP_LOGD(TAG, "readMultipleBlock: Turning ON RF field for ISO15693...");
-  if(setRF_on() != ESP_OK){                             // 2. Switch the RF field ON.
-    ESP_LOGE(TAG, "readMultipleBlock: Error turning on RF for ISO15693");
-    reset();
-    return ISO15693_EC_UNKNOWN_ERROR;
+    cmd[2+i] = card.uid[cardNum][i];
   }
 
   clearIRQStatus(0x000FFFFF); // 3. Clear all IRQ_STATUS flags
-  sendData(readMultipleCmd, 12, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
+  sendData(cmd, 12, 0); // 4. 5. 6. Idle/StopCom Command, Transceive Command, Inventory command
   vTaskDelay(pdMS_TO_TICKS(15));
 
-  uint32_t irqR = getIRQStatus();
+  uint32_t irqStatus = getIRQStatus();
   uint16_t retries = 5;
-  while (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT) && retries > 0) {   // 8. wait for RX start of frame (max 50ms)
+  while (!(irqStatus & PN5180_RX_SOF_DET_IRQ_STAT) && retries > 0) {   // 8. wait for RX start of frame (max 50ms)
     vTaskDelay(10 / portTICK_PERIOD_MS);
-    irqR = getIRQStatus();
+    irqStatus = getIRQStatus();
 	  retries--;
   }
-  if (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
-    printIRQStatus(TAG, irqR);
-    ESP_LOGE(TAG, "readMultipleBlock: No data response.");
-    setRF_off();
-    return EC_NO_CARD;
+  if (!(irqStatus & PN5180_RX_SOF_DET_IRQ_STAT)){ // 7. Check if RX data being sent
+    //printIRQStatus(TAG, irqStatus);
+    ESP_LOGW(TAG, "iso15693ReadMultipleBlock: No data response.");
+    return false;
   }
   retries = 5;
-  while (!(irqR & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
+  while (!(irqStatus & PN5180_RX_IRQ_STAT) && retries > 0) {   // 8. wait for RX end of frame (max 50ms)
     vTaskDelay(10 / portTICK_PERIOD_MS);
-    irqR = getIRQStatus();
+    irqStatus = getIRQStatus();
 	  retries--;
   }
   uint32_t rxStatus;
   readRegister(PN5180_RX_STATUS, &rxStatus);
   uint16_t len = (uint16_t)(rxStatus & 0x000001ff);
-  if(!(irqR & PN5180_RX_IRQ_STAT)){
-    ESP_LOGE(TAG, "readMultipleBlock: Timeout waiting for response to end. Datalen=%d", len);
-    setRF_off();
-    reset();
-    return EC_NO_CARD;
+  if(!(irqStatus & PN5180_RX_IRQ_STAT)){
+    ESP_LOGW(TAG, "iso15693ReadMultipleBlock: Timeout waiting for response to end. Datalen=%d", len);
+    return false;
   }
   if(!len){
-    ESP_LOGE(TAG, "readMultipleBlock: Length is 0!!");
-    setRF_off();
-    return EC_NO_CARD;
+    ESP_LOGW(TAG, "iso15693ReadMultipleBlock: Length is 0!!");
+    return false;
   }
 
-  uint8_t *resultPtr = readBuffer;
-  uint8_t startAddr = blockNo * blockSize;
-  resultPtr = readData(len);
-  for (int i=0; i<numBlock * blockSize; i++) {
-    ESP_LOGD(TAG,"readMultipleBlock: resultPtr=%d", resultPtr[1+i]);
-    blockData[startAddr + i] = resultPtr[1+i];
+  uint8_t *p = readBuffer;
+  uint8_t startAddr = card.blocksRead[cardNum] * card.blockSize[cardNum];
+  p = readData(len);
+  for (int i=0; i<numBlock * card.blockSize[cardNum]; i++) {
+    ESP_LOGD(TAG,"iso15693ReadMultipleBlock: resultPtr=%d", p[1+i]);
+    card.data[cardNum][startAddr + i] = p[1+i];
   }
+  card.blocksRead[cardNum]++;
 
-  ESP_LOGD(TAG,"readMultipleBlock: Value=");
-  ESP_LOG_BUFFER_HEX_LEVEL(TAG, blockData, numBlock * blockSize, ESP_LOG_DEBUG);
+  ESP_LOGD(TAG,"iso15693ReadMultipleBlock: Value=");
+  ESP_LOG_BUFFER_HEX_LEVEL(TAG, card.data[cardNum], numBlock * card.blockSize[cardNum], ESP_LOG_DEBUG);
 
   setRF_off();
-  return ISO15693_EC_OK;
-}
-
-/*
- * ISO 15693 - Protocol
- *
- * General Request Format:
- *  SOF, Req.Flags, Command code, Parameters, Data, CRC16, EOF
- *
- *  Request Flags:
- *    xxxx.3210
- *         |||\_ Subcarrier flag: 0=single sub-carrier, 1=two sub-carrier
- *         ||\__ Datarate flag: 0=low data rate, 1=high data rate
- *         |\___ Inventory flag: 0=no inventory, 1=inventory
- *         \____ Protocol extension flag: 0=no extension, 1=protocol format is extended
- *
- *  If Inventory flag is set:
- *    7654.xxxx
- *     ||\_ AFI flag: 0=no AFI field present, 1=AFI field is present
- *     |\__ Number of slots flag: 0=16 slots, 1=1 slot
- *     \___ Option flag: 0=default, 1=meaning is defined by command description
- *
- *  If Inventory flag is NOT set:
- *    7654.xxxx
- *     ||\_ Select flag: 0=request shall be executed by any VICC according to Address_flag
- *     ||                1=request shall be executed only by VICC in selected state
- *     |\__ Address flag: 0=request is not addressed. UID field is not present.
- *     |                  1=request is addressed. UID field is present. Only VICC with UID shall answer
- *     \___ Option flag: 0=default, 1=meaning is defined by command description
- *
- * General Response Format:
- *  SOF, Resp.Flags, Parameters, Data, CRC16, EOF
- *
- *  Response Flags:
- *    xxxx.3210
- *         |||\_ Error flag: 0=no error, 1=error detected, see error field
- *         ||\__ RFU: 0
- *         |\___ RFU: 0
- *         \____ Extension flag: 0=no extension, 1=protocol format is extended
- *
- *  If Error flag is set, the following error codes are defined:
- *    01 = The command is not supported, i.e. the request code is not recognized.
- *    02 = The command is not recognized, i.e. a format error occurred.
- *    03 = The option is not supported.
- *    0F = Unknown error.
- *    10 = The specific block is not available.
- *    11 = The specific block is already locked and cannot be locked again.
- *    12 = The specific block is locked and cannot be changed.
- *    13 = The specific block was not successfully programmed.
- *    14 = The specific block was not successfully locked.
- *    A0-DF = Custom command error codes
- *
- *  Function return values:
- *    0 = OK
- *   -1 = No card detected
- *   >0 = Error code
- */
-ISO15693ErrorCode_t pn5180::ISO15693Command(uint8_t *cmd, uint16_t cmdLen, uint8_t **resultPtr) {
-  ESP_LOGD(TAG,"ISO5693Command: Issue Command 0x%X...", cmd[1]);
-  sendData(cmd, cmdLen, 0);
-  vTaskDelay(10 / portTICK_PERIOD_MS);
-
-  uint16_t retries = 50;
-  uint32_t irqR = getIRQStatus();
-  while (!(irqR & PN5180_RX_SOF_DET_IRQ_STAT) && retries > 0) {   // wait for RF field to set up (max 500ms)
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-	  irqR = getIRQStatus();
-    retries--;
-  }
-  if (0 == (irqR & PN5180_RX_SOF_DET_IRQ_STAT)){
-    printIRQStatus(TAG, irqR);
-    ESP_LOGE(TAG, "ISO15693Command: No RX_SOF_DET IRQ. State=%ld", irqR);
-    //return EC_NO_CARD;
-  }
-  retries = 50;
-  while (!(irqR & PN5180_RX_IRQ_STAT) && retries > 0) {   // wait for RX end of frame (max 500ms)
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-    irqR = getIRQStatus();
-	  retries--;
-  }
-  uint32_t rxStatus;
-  readRegister(PN5180_RX_STATUS, &rxStatus);
-  uint16_t len = (uint16_t)(rxStatus & 0x000001ff);
-  if(!(irqR & PN5180_RX_IRQ_STAT) && !len){
-    printIRQStatus(TAG, irqR);
-    ESP_LOGE(TAG, "ISO15693Command: No EOF_RX IRQ and RX_STATUS: length = 0. State=%ld", irqR);
-    clearIRQStatus(PN5180_TX_IRQ_STAT | PN5180_IDLE_IRQ_STAT);
-    return EC_NO_CARD;
-  }
-  
-  ESP_LOGD(TAG,"ISO5693Command: RX-Status=0x%lX, len=%d", rxStatus, len);
-
-  *resultPtr = readData(len);
-  if (0L == *resultPtr) {
-    ESP_LOGE(TAG,"ISO5693Command: ERROR in readData!");
-    return ISO15693_EC_UNKNOWN_ERROR;
-  }
-
-  uint32_t irqStatus = getIRQStatus();
-  if (0 == (PN5180_RX_SOF_DET_IRQ_STAT & irqStatus)) { // no card detected
-    printIRQStatus(TAG, irqR);
-    clearIRQStatus(PN5180_TX_IRQ_STAT | PN5180_IDLE_IRQ_STAT);
-    return EC_NO_CARD;
-  }
-
-  uint8_t responseFlags = (*resultPtr)[0];
-  if (responseFlags & (1<<0)) { // error flag
-    uint8_t errorCode = (*resultPtr)[1];
-    ESP_LOGE(TAG,"ISO5693Command: ERROR code=%X",errorCode);
-    //printError(errorCode);
-    if (errorCode >= 0xA0) { // custom command error codes
-      return ISO15693_EC_CUSTOM_CMD_ERROR;
-    }
-    else return (ISO15693ErrorCode_t)errorCode;
-  }
-
-  ESP_LOGD(TAG,"ISO5693Command: Extension flag: %d", (responseFlags & (1<<3)));
-
-  clearIRQStatus(PN5180_RX_SOF_DET_IRQ_STAT | PN5180_IDLE_IRQ_STAT | PN5180_TX_IRQ_STAT | PN5180_RX_IRQ_STAT);
-  return ISO15693_EC_OK;
+  return true;
 }
 
 void pn5180::printError(uint8_t err) {
@@ -1721,37 +1999,37 @@ void pn5180::printError(uint8_t err) {
   ESP_LOGE(TAG, "ISO15693 Error: %s", strErr);
 }
 
-void pn5180::printUID(){
+void pn5180::printUID(uint8_t cardNum){
   printf("\033[32mI (%ld) %s: UID=", esp_log_timestamp(), TAG);
-  for(int i=uidLength-1; i>=0; i--){
-    if(uid[i] < 16) printf("0");
-    printf("%X", uid[i]);
+  for(int i=card.uidLength[cardNum]-1; i>=0; i--){
+    if(card.uid[cardNum][i] < 16) printf("0");
+    printf("%X", card.uid[cardNum][i]);
     if(i > 0) printf(":");
   }
   printf("\n\033[0m");
 }
 
-void pn5180::printSingleBlock(uint8_t blockNum){
-  if(blockNum + startBlock > endBlock){
-    ESP_LOGE(TAG, "Chosen block is not a valid block");
+void pn5180::printSingleBlock(uint8_t cardNum, uint8_t blockNum){
+  if(blockNum + card.startBlock[cardNum] > card.endBlock[cardNum]){
+    ESP_LOGW(TAG, "Chosen block (%d) is not a valid block", blockNum + card.startBlock[cardNum]);
   }
   else{
     if(ESP_LOG_INFO <= esp_log_level_get(TAG)){
-      uint16_t startAddr = blockSize * blockNum;
+      uint16_t startAddr = card.blockSize[cardNum] * (blockNum /*+ card.startBlock[cardNum]*/);
       // Hex print
       ESP_LOGD(TAG, "startAddr=%d", startAddr);
       printf("\033[32mI (%ld) %s: ", esp_log_timestamp(), TAG);
-      for (int i=0; i<blockSize; i++) {
-        if(blockData[startAddr + i] < 16) printf("0");
-        printf("%X", blockData[startAddr + i]);
-        if(i < blockSize - 1) printf(":");
+      for (int i=0; i<card.blockSize[cardNum]; i++) {
+        if(card.data[cardNum][startAddr + i] < 16) printf("0");
+        printf("%X", card.data[cardNum][startAddr + i]);
+        if(i < card.blockSize[cardNum] - 1) printf(":");
       }
       
       printf(" ");
       
       // String print
-      for (int i=0; i<blockSize; i++) {
-        char c = blockData[startAddr + i];
+      for (int i=0; i<card.blockSize[cardNum]; i++) {
+        char c = card.data[cardNum][startAddr + i];
         if (isprint(c)) {
           printf("%c",c);
         }
@@ -1762,23 +2040,26 @@ void pn5180::printSingleBlock(uint8_t blockNum){
   }
 }
 
-void pn5180::printAllBlockData(){
-  if(ESP_LOG_INFO <= esp_log_level_get(TAG)){
+void pn5180::printMultipleBlock(uint8_t cardNum, uint8_t blockNum, uint8_t numBlock){
+  if(blockNum + card.startBlock[cardNum] + numBlock > card.endBlock[cardNum]){
+    ESP_LOGW(TAG, "Chosen blocks exceed card memory");
+  }
+  else if(ESP_LOG_INFO <= esp_log_level_get(TAG)){
     // Hex print
-    for(int block=0; block<numBlocks; block++){
-      uint16_t startAddr = (block * blockSize);
-      printf("\033[32mI (%ld) %s: ", esp_log_timestamp(), TAG);
-      for (int i=0; i<blockSize; i++) {
-        if(blockData[startAddr + i] < 16) printf("0");
-        printf("%X", blockData[startAddr + i]);
-        if(i < blockSize - 1) printf(":");
+    for(int block=blockNum; block<numBlock; block++){
+      uint16_t startAddr = ((block + card.startBlock[cardNum]) * card.blockSize[cardNum]);
+      printf("\033[32mI (%ld) %s: Block %d", esp_log_timestamp(), TAG, blockNum);
+      for (int i=0; i<card.blockSize[cardNum]; i++) {
+        if(card.data[cardNum][startAddr + i] < 16) printf("0");
+        printf("%X", card.data[cardNum][startAddr + i]);
+        if(i < card.blockSize[cardNum] - 1) printf(":");
       }
       
       printf(" ");
       
       // String print
-      for (int i=0; i<blockSize; i++) {
-        char c = blockData[startAddr + i];
+      for (int i=0; i<card.blockSize[cardNum]; i++) {
+        char c = card.data[cardNum][startAddr + i];
         if (isprint(c)) {
           printf("%c",c);
         }
@@ -1786,6 +2067,23 @@ void pn5180::printAllBlockData(){
       }
       printf("\n\033[0m");
     }
+  }
+}
+
+void pn5180::printData(uint8_t cardNum){
+  if(ESP_LOG_INFO <= esp_log_level_get(TAG)){
+    bool flag_stopChar = false;
+    uint16_t pos = 0;
+    // Hex print
+    printf("\033[32mI (%ld) %s: printData: ", esp_log_timestamp(), TAG);
+    while(!flag_stopChar){
+      char c = card.data[cardNum][pos++];
+      if (isprint(c)) {
+        printf("%c",c);
+      }
+      else flag_stopChar = true;
+    }
+    printf("\n\033[0m");
   }
 }
 

@@ -126,10 +126,21 @@ typedef enum {
 } PN5180Error_t;
 
 typedef struct {
-  uint8_t numCard;
-  uint8_t numCol;
-  uint8_t uid[16][8];
-} ISO15693Inventory_t;
+  uint8_t uid[16][10]; // MSBFIRST (ex: uid{8,7,6,5,4,3,2,1} = 1:2:3:4:5:6:7:8)
+  uint8_t uidLength[16];
+  uint8_t type[16];
+  uint8_t manufacturer[16];
+  uint8_t dsfid[16];
+  uint8_t afi[16];
+  uint8_t ic_ref[16];
+  // The physical memory of an ISO15693 VICC is organized in the form of blocks or pages of fixed size. Up to 256 blocks can be addressed and a block size can be up to 32 bytes.
+  uint16_t numBlocks[16];
+  uint16_t blockSize[16];
+  uint16_t startBlock[16];
+  uint16_t endBlock[16];
+  uint8_t blocksRead[16];
+  uint8_t data[16][16];
+} RFIDCard_t;
 
 extern const char manufacturerCode[110][100];
 extern const char afi_string[14][18];
@@ -150,33 +161,34 @@ private:
   uint8_t product[2]; // {minor ver, major ver}
   uint8_t firmware[2]; // {minor ver, major ver}
   uint8_t eeprom[2]; // {minor ver, major ver}
-  uint8_t manufacturer;
+  //uint8_t manufacturer;
   uint8_t numCard;
-  uint8_t type;
-  uint8_t uid[160]; // MSBFIRST (ex: uid{8,7,6,5,4,3,2,1} = 1:2:3:4:5:6:7:8)
-  uint8_t uidLength;
-  uint8_t dsfid;
-  uint8_t afi;
-  uint8_t ic_ref;
+  //uint8_t type;
+  //uint8_t uid[160]; // MSBFIRST (ex: uid{8,7,6,5,4,3,2,1} = 1:2:3:4:5:6:7:8)
+  //uint8_t uidLength;
+  //uint8_t dsfid;
+  //uint8_t afi;
+  //uint8_t ic_ref;
   // The physical memory of an ISO15693 VICC is organized in the form of blocks or pages of fixed size. Up to 256 blocks can be addressed and a block size can be up to 32 bytes.
-  uint16_t numBlocks;
-  uint16_t blockSize;
-  uint16_t startBlock;
-  uint16_t endBlock;
-  uint8_t blockData[508];
+  //uint16_t numBlocks;
+  //uint16_t blockSize;
+  //uint16_t startBlock;
+  //uint16_t endBlock;
+  //uint8_t blockData[508];
   uint8_t readBuffer[508];
   uint8_t sak[10];
-  ISO15693Inventory_t poll;
+  RFIDCard_t card;
 
 public:
   pn5180(uint8_t MISOpin, uint8_t MOSIpin, uint8_t CLKpin, uint8_t SSpin, uint8_t BUSYpin, uint8_t RSTpin, spi_host_device_t host);
-  uint8_t getManufacturer(void) const;
-  uint8_t getType(void) const;
-  uint8_t getDsfid(void) const;
-  uint8_t getAfi(void) const;
-  uint8_t getICRef(void) const;
-  uint8_t getBlockSize(void) const;
-  uint8_t getNumBlocks(void) const;
+  uint8_t getNumCard(void) const;
+  uint8_t getManufacturer(uint8_t cardNum);
+  uint8_t getType(uint8_t cardNum);
+  uint8_t getDsfid(uint8_t cardNum);
+  uint8_t getAfi(uint8_t cardNum);
+  uint8_t getICRef(uint8_t cardNum);
+  uint8_t getBlockSize(uint8_t cardNum);
+  uint8_t getNumBlocks(uint8_t cardNum);
   //uint8_t *getUID(void) const { return uid };
 
   void begin(void);
@@ -187,19 +199,23 @@ public:
   
   PN5180Error_t getInventory();
   PN5180Error_t getInventoryMultiple();
-  void printInfo();
-  void clearInfo();
+  void printInfo(uint8_t cardNum);
+  void clearInfo(uint8_t cardNum);
   PN5180Error_t getData(uint8_t blockNo);
+  PN5180Error_t getData(uint8_t blockNo, uint8_t numBlock);
+  PN5180Error_t readData(void);
+  PN5180Error_t writeData(const char* data);
   PN5180Error_t readSingleBlock(uint8_t protocol, uint8_t blockNo);
-  ISO15693ErrorCode_t writeSingleBlock(uint8_t blockNo, uint8_t* blockData, uint8_t len);
-  ISO15693ErrorCode_t readMultipleBlock(uint8_t blockNo, uint8_t numBlock);
+  PN5180Error_t writeSingleBlock(uint8_t blockNo, uint8_t* blockData, uint8_t len);
+  PN5180Error_t readMultipleBlock(uint8_t protocol, uint8_t blockNo, uint8_t numBlock);
 
   void printIRQStatus(const char* tag, uint32_t irqStatus);
   void printRfStatus(const char* tag, uint32_t rfStatus);
   void printError(uint8_t err);
-  void printUID();
-  void printSingleBlock(uint8_t blockNum);
-  void printAllBlockData();
+  void printUID(uint8_t cardNum);
+  void printSingleBlock(uint8_t cardNum, uint8_t blockNum);
+  void printMultipleBlock(uint8_t cardNum, uint8_t blockNum, uint8_t numBlock);
+  void printData(uint8_t cardNum);
 
 private:
   esp_err_t writeRegister(uint8_t reg, uint32_t value);
@@ -210,6 +226,7 @@ private:
   esp_err_t readRegisterMultiple(uint8_t *reg, uint8_t len, uint32_t *value);
   esp_err_t writeEEprom(uint8_t addr, uint8_t *buffer, uint16_t len);
   esp_err_t sendData(uint8_t *data, uint16_t len, uint8_t validBits);
+  PN5180Error_t sendData(const char *data);
   uint8_t* readData(int len);
   esp_err_t prepareLPCD();
   esp_err_t switchToLPCD(uint16_t wakeupCounterInMs);
@@ -231,14 +248,17 @@ private:
   PN5180Error_t iso14443poll(uint8_t atqaCmd);
   void iso14443GetSystemInfo(uint8_t ats);
   bool mifareAuthenticate(uint8_t blockNo);
-  bool mifareBlockRead(uint8_t blockno);
-  bool mifareBlockWrite(uint8_t *blockData, uint8_t blockNo);
+  bool mifareReadBlock(uint8_t cardNum, uint8_t blockNo);
+  bool mifareReadMultipleBlock(uint8_t cardNum, uint8_t blockNo, uint8_t numBlock);
+  bool mifareWriteBlock(const char *blockData, uint8_t blockNo);
   void mifareHalt(void);
   ISO15693ErrorCode_t iso15693Poll(void);
-  PN5180Error_t iso15693PollSingle(void);
-  PN5180Error_t iso15693GetSystemInfo(void);
-  bool iso15693ReadBlock(uint8_t blockNo);
-  ISO15693ErrorCode_t ISO15693Command(uint8_t *cmd, uint16_t cmdLen, uint8_t **resultPtr);
+  PN5180Error_t iso15693PollSingle(uint8_t cardNum);
+  PN5180Error_t iso15693GetSystemInfo(uint8_t cardNum);
+  bool iso15693ReadBlock(uint8_t cardNum, uint8_t blockNo);
+  bool iso15693WriteBlock(uint8_t cardNum, uint8_t blockNo, uint8_t* blockData, uint8_t len);
+  bool iso15693WriteBlock(const char *blockData, uint8_t blockNo);
+  bool iso15693ReadMultipleBlock(uint8_t cardNum, uint8_t blockNo, uint8_t numBlock);
 };
 
 #endif /* PN5180_H */

@@ -5,7 +5,7 @@
     "board/esp32s2-bridge.cfg"
   ],
   "idf.flashType": "UART",
-  "idf.portWin": "COM15",
+  "idf.portWin": "COM21",
   "files.associations": {
     "typeinfo": "cpp",
     "limits": "cpp",
